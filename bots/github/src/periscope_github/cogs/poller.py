@@ -11,6 +11,7 @@ from periscope import LabBot
 from ..client import GithubClient, Reachability
 from ..dispatch import get_dispatcher
 from ..render import parse_ts
+from ..train import CiTrains
 
 log = logging.getLogger(__name__)
 
@@ -116,13 +117,13 @@ ADAPTERS: dict[str, tuple[str, Any]] = {
 }
 
 
-def adapt_workflow_run(repo: str, run: dict[str, Any], org: str) -> dict[str, Any]:
-    """Actions API run -> webhook-shaped workflow_run payload (action=completed)."""
+def adapt_workflow_run(repo: str, run: dict[str, Any], org: str, action: str = "completed") -> dict[str, Any]:
+    """Actions API run -> webhook-shaped workflow_run payload."""
     actor = run.get("triggering_actor") or run.get("actor") or {}
     login = actor.get("login") or "?"
     repo_obj = run.get("repository") or {}
     return {
-        "action": "completed",
+        "action": action,
         "workflow_run": run,
         "workflow": {"name": run.get("name")},
         "sender": {"login": login, "avatar_url": actor.get("avatar_url"), "html_url": f"{GITHUB}/{login}",
@@ -157,11 +158,14 @@ class GithubPoller(commands.Cog):
         self.state = bot.state.namespace("gh:poll")
         self.reach = Reachability(bot, "GitHub API (poll)")
         self.etag: str | None = self.state.get("etag")
+        self.trains = CiTrains(bot, self.client, self.cfg, on_complete=self._train_done)
+        bot.ci_trains = self.trains  # type: ignore[attr-defined]  # webhook events can start trains too
         if self.cfg.poll_enabled:
             self.poll.change_interval(seconds=self.cfg.poll_interval_s)
             self.poll.start()
             self.poll_ci.change_interval(seconds=max(self.cfg.poll_interval_s, 60))
             self.poll_ci.start()
+            self.watch_trains.start()
             log.info("polling /orgs/%s/events + workflow runs every %ss", self.cfg.org, self.cfg.poll_interval_s)
         else:
             log.info("polling disabled (GITHUB_POLL_ENABLED=false)")
@@ -169,6 +173,21 @@ class GithubPoller(commands.Cog):
     async def cog_unload(self) -> None:
         self.poll.cancel()
         self.poll_ci.cancel()
+        self.watch_trains.cancel()
+
+    async def _train_done(self, repo: str, run: dict[str, Any]) -> None:
+        await self.dispatcher.note_completed_run(adapt_workflow_run(repo, run, self.cfg.org))
+
+    @tasks.loop(seconds=15)
+    async def watch_trains(self) -> None:
+        try:
+            await self.trains.tick()
+        except Exception:  # noqa: BLE001
+            log.exception("CI train refresh failed")
+
+    @watch_trains.before_loop
+    async def _wait_trains(self) -> None:
+        await self.bot.wait_until_ready()
 
     @tasks.loop(seconds=120)
     async def poll(self) -> None:
@@ -210,35 +229,55 @@ class GithubPoller(commands.Cog):
 
     @tasks.loop(seconds=120)
     async def poll_ci(self) -> None:
+        """Every workflow run (CI, release builds, anything under Actions): started → completed."""
         try:
             repos = [r["name"] for r in await self.client.list_repos() if not r.get("archived")]
         except Exception as e:  # noqa: BLE001
             await self.reach.failure(e)
             return
-        seen: dict[str, int] = self.state.get("ci_seen", {}) or {}
+        seen: dict[str, int] = self.state.get("ci_seen", {}) or {}          # repo -> newest run id fully handled
+        running: dict[str, str] = self.state.get("ci_running", {}) or {}   # run id -> status already announced
         first_run = not seen
         for name in repos:
             try:
-                runs = await self.client.workflow_runs(name, per_page=10)
+                runs = await self.client.workflow_runs(name, per_page=15)
             except Exception:  # noqa: BLE001
                 log.debug("workflow runs unavailable for %s", name, exc_info=True)
                 continue
-            completed = [r for r in runs if r.get("status") == "completed"]
-            if not completed:
+            if not runs:
                 continue
-            newest = max(int(r["id"]) for r in completed)
             last = int(seen.get(name, 0))
-            seen[name] = max(last, newest)
+            newest_completed = max((int(r["id"]) for r in runs if r.get("status") == "completed"), default=last)
             if first_run or last == 0:
+                seen[name] = max(last, newest_completed, max(int(r["id"]) for r in runs))
                 continue  # baseline silently, never replay history
-            for run in sorted((r for r in completed if int(r["id"]) > last), key=lambda r: int(r["id"])):
-                payload = adapt_workflow_run(name, run, self.cfg.org)
+            for run in sorted(runs, key=lambda r: int(r["id"])):
+                rid, status = str(run["id"]), run.get("status") or "queued"
+                if status == "completed":
+                    if int(rid) <= last and rid not in running:
+                        continue
+                    was_live = running.pop(rid, None) is not None
+                    if was_live and self.trains.is_tracked(rid):
+                        continue  # the train's own tick() will finalize it
+                    action = "completed"
+                elif rid in running or int(rid) <= last:
+                    continue
+                else:
+                    running[rid] = status
+                    if await self.trains.start(name, run):
+                        continue  # live card posted; no separate "started" event
+                    action = "in_progress" if status == "in_progress" else "requested"
+                payload = adapt_workflow_run(name, run, self.cfg.org, action=action)
                 try:
-                    await self.dispatcher.dispatch("workflow_run", payload, delivery_id=f"poll:run:{run['id']}",
+                    await self.dispatcher.dispatch("workflow_run", payload, delivery_id=f"poll:run:{rid}:{action}",
                                                    source="poll", when=parse_ts(run.get("updated_at")))
                 except Exception:  # noqa: BLE001
-                    log.exception("failed to dispatch polled workflow run %s", run.get("id"))
+                    log.exception("failed to dispatch polled workflow run %s", rid)
+            seen[name] = max(last, newest_completed)
+        # forget runs that vanished from the recent window
+        live = {str(r) for r in running}
         self.state.set("ci_seen", seen)
+        self.state.set("ci_running", {k: v for k, v in running.items() if k in live})
 
     @poll_ci.before_loop
     async def _wait_ci(self) -> None:

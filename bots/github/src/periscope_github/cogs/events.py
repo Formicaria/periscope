@@ -46,10 +46,19 @@ class GithubEvents(commands.Cog):
             return web.json_response({"ok": True, "pong": True})
         if not event:
             return web.json_response({"error": "missing X-GitHub-Event"}, status=400)
-        if event not in RENDERERS:
+        if event not in RENDERERS and not self.dispatcher.cfg.verbose:
             log.debug("unhandled GitHub event %s (delivery %s)", event, delivery)
             return web.json_response({"ok": True, "ignored": event})
 
+        trains = getattr(self.bot, "ci_trains", None)
+        if event == "workflow_run" and trains is not None and isinstance(payload.get("workflow_run"), dict):
+            run, repo = payload["workflow_run"], (payload.get("repository") or {}).get("name")
+            if repo and run.get("status") != "completed":
+                if await trains.start(repo, run):
+                    return web.json_response({"ok": True, "posted": True, "train": True})
+            elif repo and trains.is_tracked(run.get("id")):
+                await trains.tick()
+                return web.json_response({"ok": True, "posted": True, "train": True})
         posted = await self.dispatcher.dispatch(event, payload, delivery_id=delivery, source="webhook")
         return web.json_response({"ok": True, "posted": posted})
 

@@ -120,7 +120,8 @@ GitHub variables:
 | `GITHUB_FEED_CHANNEL_ID` | `ALERT_CHANNEL_ID` | Default channel for the feed (e.g. `#formicaria`) |
 | `GITHUB_REPO_CHANNEL_MAP` | — | `anthill=<#op-anthill id>,sovrgn=<#op-sovrgn id>,microround*=<id>` — per-repo routing; exact names win, then glob patterns (`*`, `?`), then the default |
 | `GITHUB_EVENTS` | all | Comma list of `X-GitHub-Event` names to post, e.g. `push,pull_request,release,workflow_run` |
-| `GITHUB_IGNORE_BOTS` | `true` | Drop events whose sender ends in `[bot]` (dependabot, github-actions…) |
+| `GITHUB_VERBOSE` | `true` | Post every event and action (PR syncs/labels, review edits, in-progress runs, unknown event types get a generic card). `false` = curated highlights only |
+| `GITHUB_IGNORE_BOTS` | `false` | `true` drops events whose sender ends in `[bot]` (dependabot, github-actions…) — off by default so Actions-made commits and releases show |
 | `GITHUB_CI_FAILURE_ROLE_ID` | — | Role pinged (as a reply to the alert) when a workflow fails on a default branch |
 | `GITHUB_POLL_ENABLED` | `true` | Poll the org feed + workflow runs with `GITHUB_TOKEN` (see below) |
 | `GITHUB_POLL_INTERVAL_S` | `120` | Poll period (≥ 30; GitHub's `X-Poll-Interval` is honoured) |
@@ -136,7 +137,7 @@ GITHUB_REPO_CHANNEL_MAP=anthill=<#op-anthill>,microround=<#op-microround>,sovrgn
 
 Two sources, both feeding the same pipeline (dedupe by delivery id, so running both is safe):
 
-- **Polling** (default on when `GITHUB_TOKEN` is set): every `GITHUB_POLL_INTERVAL_S` the bot reads the org event feed (push, PR, issues, releases, forks, stars, branches, members…) **and** each repo's recent workflow runs (the event feed never carries CI results). Nothing inbound needed. First run baselines silently — no history replay. Latency ≈ the poll interval.
+- **Polling** (default on when `GITHUB_TOKEN` is set): every `GITHUB_POLL_INTERVAL_S` the bot reads the org event feed (push, PR, issues, releases, forks, stars, branches, members…) **and** each repo's workflow runs — every Actions run (CI, release builds, anything with a workflow) gets a **live train card** in the CI channel the moment it's spotted, refreshed every 15 s with one line per job (⚪ queued · 🟡 running with `step n/m · name` · ✅ ❌ ⏭️ with duration) and finalized green/red with the total time. The event feed alone never carries runs. Nothing inbound needed. First run baselines silently — no history replay. Latency ≈ the poll interval.
 - **Org webhook** (optional, instant): github.com/organizations/&lt;org&gt;/settings/hooks → Add webhook → `https://<public-host>/github`, `application/json`, secret = `WEBHOOK_SECRET`, "Send me everything". Needs the bot's port reachable from GitHub (reverse proxy / Cloudflare Tunnel / Tailscale Funnel).
 
 Routing: `GITHUB_FEED_CHANNEL_ID` gets **every** event; CI results (`workflow_run`, `check_run`) go to `GITHUB_CI_CHANNEL_ID` instead (falls back to the feed); `GITHUB_REPO_CHANNEL_MAP` additionally mirrors a repo's non-CI events into its own channel. A failing workflow on a default branch also raises an alert in `ALERT_CHANNEL_ID` pinging `GITHUB_CI_FAILURE_ROLE_ID`, resolved in place when it goes green.

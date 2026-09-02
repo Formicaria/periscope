@@ -72,10 +72,13 @@ async def test_pipeline(tmp_path):
     d = Dispatcher(bot, cfg)
     assert await d.dispatch("star", star(), delivery_id="d1") is True
     assert await d.dispatch("star", star(), delivery_id="d1") is False  # dedupe
-    assert await d.dispatch("star", star("dependabot[bot]"), delivery_id="d2") is False  # bot filtered
-    assert len(bot.channels[123].sent) == 1 and len(bot.channels[1].sent) == 1  # feed + repo mirror
-    assert d.activity_summary() == {"star": 1}
-    assert len(d.recent()) == 1 and "starred by alice" in d.recent()[0]
+    assert await d.dispatch("star", star("dependabot[bot]"), delivery_id="d2") is True   # bots are shown by default
+    d.cfg.ignore_bots = True
+    assert await d.dispatch("star", star("dependabot[bot]"), delivery_id="d2b") is False  # ... unless filtered
+    d.cfg.ignore_bots = False
+    assert len(bot.channels[123].sent) == 2 and len(bot.channels[1].sent) == 2  # feed + repo mirror, both stars
+    assert d.activity_summary() == {"star": 2}
+    assert len(d.recent()) == 2 and "starred by alice" in d.recent()[1]
 
     # CI: failure on default branch fires CRITICAL, success resolves, feature branch does nothing
     await d.dispatch("workflow_run", wf("failure"), delivery_id="w1")
@@ -120,9 +123,15 @@ async def test_webhook_route(tmp_path):
         r = await post("star", star(), delivery="s1")
         assert (await r.json())["posted"] is False  # duplicate delivery
         r = await post("gollum", {"pages": []})
-        assert r.status == 200 and (await r.json())["ignored"] == "gollum"
+        assert r.status == 200 and (await r.json())["posted"] is False   # verbose, but no repository → nothing to say
+        r = await post("gollum", {"pages": [], "repository": star()["repository"], "sender": star()["sender"]}, delivery="g2")
+        assert r.status == 200 and (await r.json())["posted"] is True    # verbose fallback card
+        bot.gh_settings.verbose = False
+        r = await post("gollum", {"pages": []}, delivery="g3")
+        assert (await r.json())["ignored"] == "gollum"
+        bot.gh_settings.verbose = True
         r = await client.post("/github", data=b"not json", headers={"X-GitHub-Event": "push", "X-Webhook-Secret": "s3cret"})
         assert r.status == 400
         r = await client.get("/health")
         assert r.status == 200
-    assert len(bot.channels[1].sent) == 1
+    assert len(bot.channels[1].sent) == 2   # the star + the verbose gollum card

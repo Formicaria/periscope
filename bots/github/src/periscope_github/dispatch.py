@@ -96,7 +96,7 @@ class Dispatcher:
             log.debug("event %s from bot sender ignored", event)
             return False
 
-        embed = render(event, payload, self.bot.lab_name)
+        embed = render(event, payload, self.bot.lab_name, verbose=self.cfg.verbose)
         if event == "workflow_run":
             await self._handle_ci(payload)
         if embed is None:
@@ -120,6 +120,14 @@ class Dispatcher:
             except discord.HTTPException as e:
                 log.error("failed to post %s to channel %s: %s", event, channel_id, e)
         return posted
+
+    async def note_completed_run(self, payload: dict[str, Any]) -> None:
+        """A run whose live train card already shows the result: update alerts/activity, post nothing."""
+        embed = render("workflow_run", payload, self.bot.lab_name, verbose=self.cfg.verbose)
+        await self._handle_ci(payload)
+        if embed is not None:
+            self.bump("workflow_run")
+            self.remember(one_liner("workflow_run", embed))
 
     async def _handle_ci(self, payload: dict[str, Any]) -> None:
         tr = ci_transition(payload)

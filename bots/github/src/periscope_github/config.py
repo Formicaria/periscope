@@ -30,7 +30,8 @@ class GithubSettings:
     ci_channel_id: int | None = None
     repo_channel_map: dict[str, int] = field(default_factory=dict)
     events: list[str] = field(default_factory=list)  # empty = all
-    ignore_bots: bool = True
+    ignore_bots: bool = False
+    verbose: bool = True
     ci_failure_role_id: int | None = None
     poll_enabled: bool = True
     poll_interval_s: int = 120
@@ -45,7 +46,8 @@ class GithubSettings:
             ci_channel_id=env_int("GITHUB_CI_CHANNEL_ID"),
             repo_channel_map=parse_channel_map(env_list("GITHUB_REPO_CHANNEL_MAP")),
             events=[e.lower() for e in env_list("GITHUB_EVENTS")],
-            ignore_bots=env_bool("GITHUB_IGNORE_BOTS", True),
+            ignore_bots=env_bool("GITHUB_IGNORE_BOTS", False),
+            verbose=env_bool("GITHUB_VERBOSE", True),
             ci_failure_role_id=env_int("GITHUB_CI_FAILURE_ROLE_ID"),
             poll_enabled=env_bool("GITHUB_POLL_ENABLED", True),
             poll_interval_s=env_int("GITHUB_POLL_INTERVAL_S", 120),

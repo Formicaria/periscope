@@ -76,6 +76,13 @@ class GithubClient(HttpClient):
         data = await self.get_json(f"/repos/{self.org}/{repo}/actions/runs", params=params)
         return data.get("workflow_runs", [])
 
+    async def workflow_run(self, repo: str, run_id: int) -> dict[str, Any]:
+        return await self.get_json(f"/repos/{self.org}/{repo}/actions/runs/{run_id}")
+
+    async def workflow_run_jobs(self, repo: str, run_id: int) -> list[dict[str, Any]]:
+        data = await self.get_json(f"/repos/{self.org}/{repo}/actions/runs/{run_id}/jobs", params={"per_page": 100})
+        return data.get("jobs", [])
+
     async def commits(self, repo: str, branch: str | None = None, n: int = 10) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"per_page": max(1, min(n, 30))}
         if branch:

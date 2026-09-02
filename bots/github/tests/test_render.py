@@ -173,3 +173,21 @@ def test_command_formatting():
     pages = pages_from_lines("t", [str(i) for i in range(25)], LAB, per_page=10)
     assert len(pages) == 3 and pages[0].title == "t (1/3)" and pages[2].description == "20\n21\n22\n23\n24"
     assert pages_from_lines("t", [], LAB)[0].description == "Nothing to show."
+
+
+def test_verbose_mode_shows_everything():
+    pr = {"number": 1, "title": "T", "html_url": "u", "base": {"ref": "main"}, "head": {"ref": "f", "sha": "abcdef12345"}}
+    assert render("pull_request", base(action="synchronize", pull_request=pr), LAB) is None
+    e = render("pull_request", base(action="synchronize", pull_request=pr), LAB, verbose=True)
+    assert e is not None and "updated (abcdef1)" in e.title
+    e = render("pull_request", base(action="labeled", pull_request=pr), LAB, verbose=True)
+    assert e is not None and "labeled" in e.title
+    run = {"name": "ci", "head_branch": "main", "run_number": 2, "head_sha": "abc1234", "html_url": "r"}
+    assert render("workflow_run", base(action="in_progress", workflow_run=run), LAB) is None
+    e = render("workflow_run", base(action="in_progress", workflow_run=run), LAB, verbose=True)
+    assert e is not None and "▶️" in e.title and "in progress" in e.title
+    # unknown event → generic card, only when the payload names a repository
+    assert render("gollum", base(action="edited", pages=[]), LAB) is None
+    e = render("gollum", base(action="edited", pages=[]), LAB, verbose=True)
+    assert e is not None and "gollum edited" in e.title
+    assert render("gollum", {"action": "edited"}, LAB, verbose=True) is None

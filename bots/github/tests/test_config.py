@@ -8,8 +8,8 @@ def test_defaults(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     s = GithubSettings.from_env()
     assert s.org == "formicaria"
-    assert s.ignore_bots is True
-    assert s.poll_enabled is False
+    assert s.ignore_bots is False and s.verbose is True   # everything, everyone, by default
+    assert s.poll_enabled is False                         # no token in this test → webhook-only
     assert s.poll_interval_s == 120
     assert s.wants_event("push")
 

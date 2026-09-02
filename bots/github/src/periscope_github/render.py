@@ -115,9 +115,9 @@ def render_delete(p: dict[str, Any], lab: str) -> discord.Embed | None:
 _PR_ACTIONS = {"opened", "closed", "reopened", "ready_for_review", "review_requested", "converted_to_draft"}
 
 
-def render_pull_request(p: dict[str, Any], lab: str) -> discord.Embed | None:
+def render_pull_request(p: dict[str, Any], lab: str, verbose: bool = False) -> discord.Embed | None:
     action = p.get("action")
-    if action not in _PR_ACTIONS:
+    if action not in _PR_ACTIONS and not verbose:
         return None
     pr = p.get("pull_request") or {}
     merged = bool(pr.get("merged"))
@@ -130,8 +130,10 @@ def render_pull_request(p: dict[str, Any], lab: str) -> discord.Embed | None:
         verb, color = "ready for review", GREEN
     elif action == "converted_to_draft":
         verb, color = "converted to draft", GREY
+    elif action == "synchronize":
+        verb, color = f"updated ({(pr.get('head') or {}).get('sha', '')[:7]})", BLUE
     else:
-        verb, color = action, (GREY if pr.get("draft") else BLUE)
+        verb, color = str(action or "?").replace("_", " "), (GREY if pr.get("draft") else BLUE)
     title = f"[{repo_name(p)}] PR #{pr.get('number')} {verb}: {pr.get('title', '')}"
     if pr.get("draft") and action not in ("closed",):
         title += " (draft)"
@@ -149,8 +151,8 @@ def render_pull_request(p: dict[str, Any], lab: str) -> discord.Embed | None:
     return base_embed(p, title, desc, lab, color=color, url=pr.get("html_url"))
 
 
-def render_pull_request_review(p: dict[str, Any], lab: str) -> discord.Embed | None:
-    if p.get("action") != "submitted":
+def render_pull_request_review(p: dict[str, Any], lab: str, verbose: bool = False) -> discord.Embed | None:
+    if p.get("action") != "submitted" and not verbose:
         return None
     review, pr = p.get("review") or {}, p.get("pull_request") or {}
     state = (review.get("state") or "commented").lower()
@@ -166,9 +168,9 @@ def render_pull_request_review(p: dict[str, Any], lab: str) -> discord.Embed | N
 _ISSUE_ACTIONS = {"opened", "closed", "reopened", "labeled", "unlabeled", "assigned", "unassigned", "pinned"}
 
 
-def render_issues(p: dict[str, Any], lab: str) -> discord.Embed | None:
+def render_issues(p: dict[str, Any], lab: str, verbose: bool = False) -> discord.Embed | None:
     action = p.get("action")
-    if action not in _ISSUE_ACTIONS:
+    if action not in _ISSUE_ACTIONS and not verbose:
         return None
     issue = p.get("issue") or {}
     color = {"opened": GREEN, "reopened": GREEN, "closed": GREY}.get(action, BLUE)
@@ -188,8 +190,8 @@ def render_issues(p: dict[str, Any], lab: str) -> discord.Embed | None:
     return e
 
 
-def render_issue_comment(p: dict[str, Any], lab: str) -> discord.Embed | None:
-    if p.get("action") != "created":
+def render_issue_comment(p: dict[str, Any], lab: str, verbose: bool = False) -> discord.Embed | None:
+    if p.get("action") != "created" and not verbose:
         return None
     issue, comment = p.get("issue") or {}, p.get("comment") or {}
     kind = "PR" if issue.get("pull_request") else "Issue"
@@ -199,8 +201,8 @@ def render_issue_comment(p: dict[str, Any], lab: str) -> discord.Embed | None:
                       url=comment.get("html_url"))
 
 
-def render_release(p: dict[str, Any], lab: str) -> discord.Embed | None:
-    if p.get("action") != "published":
+def render_release(p: dict[str, Any], lab: str, verbose: bool = False) -> discord.Embed | None:
+    if p.get("action") != "published" and not verbose:
         return None
     r = p.get("release") or {}
     name = r.get("name") or r.get("tag_name") or "release"
@@ -217,10 +219,14 @@ _CONCLUSION = {
 }
 
 
-def render_workflow_run(p: dict[str, Any], lab: str) -> discord.Embed | None:
-    if p.get("action") != "completed":
-        return None
+def render_workflow_run(p: dict[str, Any], lab: str, verbose: bool = False) -> discord.Embed | None:
     run = p.get("workflow_run") or {}
+    if p.get("action") != "completed":
+        if not verbose:
+            return None
+        title = f"[{repo_name(p)}] ▶️ {run.get('name', 'workflow')} {str(p.get('action') or 'started').replace('_', ' ')} on {run.get('head_branch', '?')}"
+        desc = f"Run #{run.get('run_number', '?')} • `{(run.get('head_sha') or '')[:7]}` {truncate((run.get('display_title') or ''), 80)}"
+        return base_embed(p, title, desc, lab, color=BLUE, url=run.get("html_url"))
     conclusion = run.get("conclusion") or "unknown"
     emoji, color = _CONCLUSION.get(conclusion, ("⚪", GREY))
     started, ended = parse_ts(run.get("run_started_at")), parse_ts(run.get("updated_at"))
@@ -316,9 +322,9 @@ def render_discussion_comment(p: dict[str, Any], lab: str) -> discord.Embed | No
                       url=c.get("html_url"))
 
 
-def render_check_run(p: dict[str, Any], lab: str) -> discord.Embed | None:
+def render_check_run(p: dict[str, Any], lab: str, verbose: bool = False) -> discord.Embed | None:
     cr = p.get("check_run") or {}
-    if p.get("action") != "completed" or cr.get("conclusion") not in ("failure", "timed_out"):
+    if p.get("action") != "completed" or (cr.get("conclusion") not in ("failure", "timed_out") and not verbose):
         return None
     out = cr.get("output") or {}
     title = f"[{repo_name(p)}] ❌ check failed: {cr.get('name', '?')}"
@@ -350,9 +356,38 @@ RENDERERS: dict[str, Renderer] = {
 }
 
 
-def render(event: str, payload: dict[str, Any], lab_name: str) -> discord.Embed | None:
+_VERBOSE_AWARE = {"pull_request", "pull_request_review", "issues", "issue_comment", "release", "workflow_run", "check_run"}
+
+
+def render_generic(event: str, p: dict[str, Any], lab: str) -> discord.Embed | None:
+    """Verbose fallback: a one-line card for any event we have no dedicated renderer for."""
+    action = p.get("action")
+    subject = None
+    for key in ("pull_request", "issue", "release", "comment", "review", "check_run", "check_suite", "workflow_job",
+                "deployment", "discussion", "package", "project", "milestone", "label", "alert", "ref"):
+        obj = p.get(key)
+        if isinstance(obj, dict):
+            subject = obj.get("title") or obj.get("name") or obj.get("tag_name") or obj.get("ref")
+            url = obj.get("html_url")
+            break
+        if isinstance(obj, str):
+            subject, url = obj, None
+            break
+    else:
+        url = None
+    what = event.replace("_", " ") + (f" {str(action).replace('_', ' ')}" if action else "")
+    title = f"[{repo_name(p)}] 📌 {what}" + (f": {truncate(str(subject), 80)}" if subject else "")
+    return base_embed(p, title, None, lab, color=GREY, url=url or repo_url(p))
+
+
+def render(event: str, payload: dict[str, Any], lab_name: str, verbose: bool = False) -> discord.Embed | None:
     fn = RENDERERS.get(event)
-    return fn(payload, lab_name) if fn else None
+    if fn is None:
+        return render_generic(event, payload, lab_name) if verbose and repo_name(payload) != "?" else None
+    embed = fn(payload, lab_name, verbose) if event in _VERBOSE_AWARE else fn(payload, lab_name)
+    if embed is None and verbose and event not in ("push", "delete"):
+        embed = render_generic(event, payload, lab_name)
+    return embed
 
 
 def one_liner(event: str, embed: discord.Embed, when: dt.datetime | None = None) -> str:
