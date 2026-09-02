@@ -22,7 +22,11 @@ def load_dotenv_if_present(path: str | os.PathLike | None = None) -> None:
 def _raw(name: str) -> str | None:
     """os.environ lookup that tolerates 'VALUE  # note' — systemd EnvironmentFile keeps inline comments."""
     raw = os.environ.get(name)
-    if raw is not None and "  #" in raw:
+    if raw is None:
+        return None
+    if raw.lstrip().startswith("#"):
+        return ""
+    if "  #" in raw:
         raw = raw.split("  #", 1)[0].rstrip()
     return raw
 

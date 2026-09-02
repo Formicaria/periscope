@@ -43,3 +43,6 @@ def test_env_strips_inline_comment(monkeypatch):
     from periscope.config import env_bool
     monkeypatch.setenv("FLAG", "true  # note")
     assert env_bool("FLAG") is True
+    from periscope.config import env
+    monkeypatch.setenv("LIDARR_URL", "# e.g. http://lidarr:8686")   # empty value + trimmed inline comment
+    assert env("LIDARR_URL") is None
