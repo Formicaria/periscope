@@ -19,11 +19,16 @@ def load_dotenv_if_present(path: str | os.PathLike | None = None) -> None:
     load_dotenv(path or ".env", override=False)
 
 
-def env(name: str, default: T | None = None, cast: Callable[[str], T] | None = None, required: bool = False):
+def _raw(name: str) -> str | None:
+    """os.environ lookup that tolerates 'VALUE  # note' — systemd EnvironmentFile keeps inline comments."""
     raw = os.environ.get(name)
     if raw is not None and "  #" in raw:
-        # systemd EnvironmentFile passes inline comments through; tolerate "VALUE  # note"
         raw = raw.split("  #", 1)[0].rstrip()
+    return raw
+
+
+def env(name: str, default: T | None = None, cast: Callable[[str], T] | None = None, required: bool = False):
+    raw = _raw(name)
     if raw is None or raw == "":
         if required and default is None:
             raise RuntimeError(f"Missing required environment variable: {name}")
@@ -36,14 +41,14 @@ def env_int(name: str, default: int | None = None, required: bool = False) -> in
 
 
 def env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
+    raw = _raw(name)
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def env_list(name: str, default: list[str] | None = None, sep: str = ",") -> list[str]:
-    raw = os.environ.get(name)
+    raw = _raw(name)
     if not raw:
         return list(default or [])
     return [x.strip() for x in raw.split(sep) if x.strip()]

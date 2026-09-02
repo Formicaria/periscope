@@ -37,5 +37,9 @@ def test_env_strips_inline_comment(monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "t")
     monkeypatch.setenv("LAB_COLOR", "5A189A  # Hex color used for INFO embeds")
     monkeypatch.setenv("GUILD_ID", "42  # server id")
+    monkeypatch.setenv("ADMIN_ROLE_IDS", "1,2  # Comma-separated role ids")
     s = Settings.from_env()
-    assert s.lab_color == 0x5A189A and s.guild_id == 42
+    assert s.lab_color == 0x5A189A and s.guild_id == 42 and s.admin_role_ids == [1, 2]
+    from periscope.config import env_bool
+    monkeypatch.setenv("FLAG", "true  # note")
+    assert env_bool("FLAG") is True
