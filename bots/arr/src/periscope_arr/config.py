@@ -25,6 +25,7 @@ class ArrSettings:
     qbit_url: str | None = None
     qbit_user: str = ""
     qbit_pass: str = ""
+    qbit_api_key: str = ""
     sabnzbd_url: str | None = None
     sabnzbd_api_key: str | None = None
     plex_url: str | None = None
@@ -64,6 +65,7 @@ class ArrSettings:
             qbit_url=_norm_url(env("QBIT_URL")),
             qbit_user=env("QBIT_USER", "") or "",
             qbit_pass=env("QBIT_PASS", "") or "",
+            qbit_api_key=env("QBIT_API_KEY", "") or "",
             sabnzbd_url=sab_url,
             sabnzbd_api_key=sab_key,
             plex_url=plex_url,

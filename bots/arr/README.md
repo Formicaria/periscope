@@ -76,7 +76,8 @@ Copy `.env.example` to `.env`. Core variables come from `periscope`; integration
 | `RADARR_URL` / `RADARR_API_KEY` | — | Radarr v3+ (API v3). |
 | `LIDARR_URL` / `LIDARR_API_KEY` | — | Lidarr (API v1). |
 | `PROWLARR_URL` / `PROWLARR_API_KEY` | — | Prowlarr (API v1): health + indexer status. |
-| `QBIT_URL` / `QBIT_USER` / `QBIT_PASS` | — | qBittorrent Web API v2 (cookie login). |
+| `QBIT_URL` / `QBIT_API_KEY` | — | qBittorrent Web API v2. API key = Options → Web UI → API keys (qBittorrent ≥ 5.2, sent as `Authorization: Bearer`). |
+| `QBIT_USER` / `QBIT_PASS` | — | Older qBittorrent: cookie login instead of an API key. |
 | `SABNZBD_URL` / `SABNZBD_API_KEY` | — | SABnzbd JSON API. |
 | `PLEX_URL` / `PLEX_TOKEN` | — | Plex Media Server + X-Plex-Token. |
 | `JELLYFIN_URL` / `JELLYFIN_API_KEY` | — | Jellyfin + API key. |
@@ -100,7 +101,7 @@ URLs may omit the scheme (`sonarr:8989` → `http://sonarr:8989`). Use Docker se
 | Service | Where |
 |---|---|
 | Sonarr / Radarr / Lidarr / Prowlarr | *Settings → General → Security → API Key* |
-| qBittorrent | *Tools → Options → Web UI*: enable it and note user/password. If you tick "Bypass authentication for clients in whitelisted IP subnets" for the bot's subnet, leave `QBIT_USER`/`QBIT_PASS` blank. |
+| qBittorrent | *Tools → Options → Web UI → API keys → Add* (≥ 5.2) → `QBIT_API_KEY`. Older versions: user/password, or tick "Bypass authentication for clients in whitelisted IP subnets" for the bot's subnet and leave both blank. |
 | SABnzbd | *Config → General → Security → API Key* (the full key, not the NZB key) |
 | Plex | Open any item in Plex Web → ⋯ → *Get Info* → *View XML*; the `X-Plex-Token=` value at the end of that URL is your token. |
 | Jellyfin | *Dashboard → Advanced → API Keys → +* |

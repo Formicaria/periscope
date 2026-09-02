@@ -78,15 +78,21 @@ class ArrClient(HttpClient):
 
 
 class QbitClient(HttpClient):
-    """qBittorrent Web API v2 with cookie login."""
+    """qBittorrent Web API v2. Prefers an API key (Bearer, qBittorrent ≥ 5.2); falls back to cookie login."""
 
-    def __init__(self, base: str, user: str, password: str, *, verify_ssl: bool = True):
-        super().__init__(base, headers={"Referer": base}, verify_ssl=verify_ssl)
+    def __init__(self, base: str, user: str, password: str, *, api_key: str = "", verify_ssl: bool = True):
+        headers = {"Referer": base}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        super().__init__(base, headers=headers, verify_ssl=verify_ssl)
         self._user = user
         self._pass = password
-        self._logged_in = False
+        self._api_key = api_key
+        self._logged_in = bool(api_key)
 
     async def login(self) -> None:
+        if self._api_key:
+            raise RuntimeError("qBittorrent rejected QBIT_API_KEY (Options → Web UI → API keys, needs qBittorrent ≥ 5.2)")
         resp = await self.request("POST", "api/v2/auth/login", data={"username": self._user, "password": self._pass})
         async with resp:
             text = await resp.text()
@@ -101,7 +107,7 @@ class QbitClient(HttpClient):
             return await self.get_json(path, **kw)
         except HttpError as e:
             if e.status in (401, 403):
-                self._logged_in = False
+                self._logged_in = bool(self._api_key)
                 await self.login()
                 return await self.get_json(path, **kw)
             raise
@@ -158,7 +164,7 @@ class Services:
         self.cfg = cfg
         v = cfg.verify_ssl
         self.arr: dict[str, ArrClient] = {app: ArrClient(app, url, key, verify_ssl=v) for app, (url, key) in cfg.arr.items()}
-        self.qbit = QbitClient(cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, verify_ssl=v) if cfg.qbit_url else None
+        self.qbit = QbitClient(cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, api_key=cfg.qbit_api_key, verify_ssl=v) if cfg.qbit_url else None
         self.sab = SabClient(cfg.sabnzbd_url, cfg.sabnzbd_api_key, verify_ssl=v) if cfg.sabnzbd_url else None
         self.plex = PlexClient(cfg.plex_url, cfg.plex_token, verify_ssl=v) if cfg.plex_url else None
         self.jellyfin = JellyfinClient(cfg.jellyfin_url, cfg.jellyfin_api_key, verify_ssl=v) if cfg.jellyfin_url else None

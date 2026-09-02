@@ -274,8 +274,11 @@ def step_layout(d: Discord, env: dict, shared: dict, bot: str) -> None:
             say("  Fine — create them yourself, then re-run `periscope init` (or paste IDs below).")
 
     mapping = {**SHARED, **BOT_SHARED_OVERRIDES.get(bot, {})}
+    overrides = BOT_SHARED_OVERRIDES.get(bot, {})
     for var, target in mapping.items():
-        if env.get(var):
+        # a bot-specific target (e.g. unifi alerts → #network) beats a value inherited from the shared defaults
+        inherited = var in overrides and env.get(var) and env.get(var) == shared.get(var)
+        if env.get(var) and not inherited:
             continue
         if target.startswith("@"):
             r = roles.get(target[1:])
@@ -378,8 +381,16 @@ def step_arr(env: dict) -> None:
         url = ask(f"{label} URL", env.get(f"{name}_URL"), required=False).rstrip("/")
         env[f"{name}_URL"] = url
         if url and name == "QBIT":
-            env["QBIT_USER"] = ask("qBittorrent user", env.get("QBIT_USER"), required=False)
-            env["QBIT_PASS"] = ask("qBittorrent password", env.get("QBIT_PASS"), secret=True, required=False)
+            key = ask("qBittorrent API key (≥5.2: Options → Web UI → API keys; blank = use user/password)",
+                      env.get("QBIT_API_KEY"), secret=True, required=False)
+            env["QBIT_API_KEY"] = key
+            if key:
+                st, _ = http("GET", f"{url}/api/v2/app/version", {"Authorization": f"Bearer {key}"}, verify=verify)
+                ok("qBittorrent answered") if st == 200 else warn(f"qBittorrent rejected the key ({st or 'unreachable'}) — saved anyway")
+                env["QBIT_USER"], env["QBIT_PASS"] = "", ""
+            else:
+                env["QBIT_USER"] = ask("qBittorrent user", env.get("QBIT_USER"), required=False)
+                env["QBIT_PASS"] = ask("qBittorrent password", env.get("QBIT_PASS"), secret=True, required=False)
         elif url:
             env["SABNZBD_API_KEY"] = ask("SABnzbd API key", env.get("SABNZBD_API_KEY"), secret=True)
     if not env.get("WEBHOOK_SECRET"):
