@@ -21,6 +21,9 @@ def load_dotenv_if_present(path: str | os.PathLike | None = None) -> None:
 
 def env(name: str, default: T | None = None, cast: Callable[[str], T] | None = None, required: bool = False):
     raw = os.environ.get(name)
+    if raw is not None and "  #" in raw:
+        # systemd EnvironmentFile passes inline comments through; tolerate "VALUE  # note"
+        raw = raw.split("  #", 1)[0].rstrip()
     if raw is None or raw == "":
         if required and default is None:
             raise RuntimeError(f"Missing required environment variable: {name}")

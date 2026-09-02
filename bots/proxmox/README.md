@@ -114,13 +114,20 @@ In the Proxmox web UI (or shell on any node). A dedicated user with a read-mostl
 
 ```bash
 # user + token (realm "pve" keeps it out of Linux PAM)
-pveum user add periscope@pve --comment "Discord lab bot"
-pveum role add LabBot -privs "VM.Audit VM.PowerMgmt Datastore.Audit Sys.Audit"
-pveum acl modify / -user periscope@pve -role LabBot
+pveum user add periscope@pve --comment "periscope Discord bot"
+pveum role add Periscope -privs "VM.Audit VM.PowerMgmt Datastore.Audit Sys.Audit"
+pveum acl modify / -user periscope@pve -role Periscope
 pveum user token add periscope@pve discord --privsep 0
 ```
 
-The last command prints the secret **once**. Put `periscope@pve!discord` in `PVE_TOKEN_ID` and the secret in `PVE_TOKEN_SECRET`.
+The last command prints a table — the secret is shown **once**:
+
+```
+│ full-tokenid │ periscope@pve!discord                │   → PVE_TOKEN_ID  (the wizard's default)
+│ value        │ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx │   → PVE_TOKEN_SECRET
+```
+
+Lost it? `pveum user token remove periscope@pve discord`, then re-run the last command. `periscope init proxmox` prints these same commands and checks the token against `/api2/json/version` before saving it.
 
 - `VM.Audit`, `Datastore.Audit`, `Sys.Audit` are enough for monitoring, task history and backup logs.
 - `VM.PowerMgmt` is only needed for `/pve start|stop|shutdown|reboot`; drop it for a read-only bot (the commands will then fail with a permission error from PVE).

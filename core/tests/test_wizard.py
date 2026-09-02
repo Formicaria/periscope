@@ -10,7 +10,7 @@ from periscope import wizard
 EXAMPLE = """# ---------- Discord ----------
 DISCORD_TOKEN=
 LAB_NAME=my-lab
-LAB_COLOR=5865F2
+LAB_COLOR=5865F2                 # Hex color used for INFO embeds
 GUILD_ID=
 ALERT_CHANNEL_ID=
 STATUS_CHANNEL_ID=
@@ -115,8 +115,10 @@ def test_full_run_creates_layout_and_env(tmp_path, monkeypatch):
     shared = json.loads((root / "periscope.json").read_text())
     assert shared["GUILD_ID"] == "42" and shared["STATUS_CHANNEL_ID"] == by_name["lab-status"]
     assert calls and calls[0][:2] == ["systemctl", "enable"]
-    # comments from the example survive
-    assert "# ---------- Discord ----------" in (root / "bots" / "proxmox" / ".env").read_text()
+    # full-line comments from the example survive, inline ones never reach the value line
+    text = (root / "bots" / "proxmox" / ".env").read_text()
+    assert "# ---------- Discord ----------" in text
+    assert not any("  #" in line for line in text.splitlines() if "=" in line and not line.startswith("#"))
 
 
 def test_second_run_reuses_shared_and_existing_layout(tmp_path, monkeypatch):

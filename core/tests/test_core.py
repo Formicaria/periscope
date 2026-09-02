@@ -30,3 +30,12 @@ def test_embed():
     e = lab_embed("Title", "desc", severity=Severity.CRITICAL, lab_name="lab1")
     assert e.color.value == Severity.CRITICAL.color
     assert "lab1" in e.footer.text
+
+
+def test_env_strips_inline_comment(monkeypatch):
+    from periscope.config import Settings
+    monkeypatch.setenv("DISCORD_TOKEN", "t")
+    monkeypatch.setenv("LAB_COLOR", "5A189A  # Hex color used for INFO embeds")
+    monkeypatch.setenv("GUILD_ID", "42  # server id")
+    s = Settings.from_env()
+    assert s.lab_color == 0x5A189A and s.guild_id == 42

@@ -137,11 +137,9 @@ def write_env(example: Path, target: Path, values: dict[str, str]) -> None:
     for line in example.read_text().splitlines():
         m = re.match(r"^([A-Z0-9_]+)=(.*)$", line)
         if m and m.group(1) in values:
+            # systemd EnvironmentFile keeps inline "# comments" as part of the value, so drop them
             k = m.group(1)
-            comment = ""
-            if "  #" in m.group(2):
-                comment = "  #" + m.group(2).split("  #", 1)[1]
-            lines.append(f"{k}={values[k]}{comment}")
+            lines.append(f"{k}={values[k]}")
             seen.add(k)
         else:
             lines.append(line)

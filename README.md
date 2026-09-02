@@ -75,6 +75,19 @@ periscope update            git pull, reinstall, restart every enabled bot
 
 Every future update: `git push` from your machine, then `periscope update` on the box.
 
+## Before `periscope init` — what each bot needs from you
+
+| bot | have ready |
+|---|---|
+| every bot | its Discord bot token (below) |
+| `proxmox` | PVE URL (`https://<node-ip>:8006`) + an API token — run on any PVE node as root:<br>`pveum user add periscope@pve --comment "periscope Discord bot"`<br>`pveum role add Periscope -privs "VM.Audit VM.PowerMgmt Datastore.Audit Sys.Audit"`<br>`pveum acl modify / -user periscope@pve -role Periscope`<br>`pveum user token add periscope@pve discord --privsep 0`<br>The last line prints the secret once (`value` row); token id is `periscope@pve!discord`. |
+| `arr` | Sonarr/Radarr URLs + API keys (each app: Settings → General → Security → API Key). Plex token optional (reused from displexia if it's on the same box). |
+| `unifi` | Controller URL (`https://<ip>` for UDM/UCG, `https://<host>:8443` self-hosted) + a local-only admin: Settings → Admins → Add → *Restrict to local access only*, read-only is enough. |
+| `github` | Org name, a fine-grained read-only PAT (Settings → Developer settings → Fine-grained tokens; org access, Contents/Metadata/Actions read), and a public URL for the webhook — the wizard prints the exact webhook settings at the end. |
+| `prometheus` | Prometheus + Alertmanager URLs; Grafana URL + service-account token if you want panel screenshots. |
+
+URLs are always full `scheme://host[:port]`, no trailing path.
+
 ## Discord setup (once per bot)
 
 The only thing you do in the Discord developer portal: <https://discord.com/developers/applications> → **New Application** (name it after the service, e.g. `Proxmox`) → **Bot** → **Reset Token**. No privileged intents are needed. `periscope init` takes it from there — it prints the invite link with the right permissions, detects the server once the bot joins, and creates or finds the channels and roles. (Doing it by hand instead: OAuth2 → URL Generator, scopes `bot` + `applications.commands`; then Developer Mode → right-click → Copy ID for every `*_ID` in `.env.example`.)
