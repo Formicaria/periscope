@@ -116,12 +116,13 @@ GitHub variables:
 |---|---|---|
 | `GITHUB_ORG` | `formicaria` | Organization login |
 | `GITHUB_TOKEN` | — | Fine-grained read-only PAT (see §2) |
+| `GITHUB_CI_CHANNEL_ID` | feed channel | Where workflow / check results are posted |
 | `GITHUB_FEED_CHANNEL_ID` | `ALERT_CHANNEL_ID` | Default channel for the feed (e.g. `#formicaria`) |
 | `GITHUB_REPO_CHANNEL_MAP` | — | `anthill=<#op-anthill id>,sovrgn=<#op-sovrgn id>,microround*=<id>` — per-repo routing; exact names win, then glob patterns (`*`, `?`), then the default |
 | `GITHUB_EVENTS` | all | Comma list of `X-GitHub-Event` names to post, e.g. `push,pull_request,release,workflow_run` |
 | `GITHUB_IGNORE_BOTS` | `true` | Drop events whose sender ends in `[bot]` (dependabot, github-actions…) |
 | `GITHUB_CI_FAILURE_ROLE_ID` | — | Role pinged (as a reply to the alert) when a workflow fails on a default branch |
-| `GITHUB_POLL_ENABLED` | `false` | Polling fallback (see below) |
+| `GITHUB_POLL_ENABLED` | `true` | Poll the org feed + workflow runs with `GITHUB_TOKEN` (see below) |
 | `GITHUB_POLL_INTERVAL_S` | `120` | Poll period (≥ 30; GitHub's `X-Poll-Interval` is honoured) |
 
 Example routing for the Formicaria category:
@@ -131,15 +132,14 @@ GITHUB_FEED_CHANNEL_ID=<#formicaria>
 GITHUB_REPO_CHANNEL_MAP=anthill=<#op-anthill>,microround=<#op-microround>,sovrgn=<#op-sovrgn>,pherosphere*=<#op-pherosphere>
 ```
 
-## Polling fallback
+## How events reach the bot
 
-If you cannot create an org webhook (no owner rights, bot not reachable from the internet), set
-`GITHUB_POLL_ENABLED=true`. The bot then polls `GET /orgs/{org}/events` with `ETag`/`If-None-Match` (304s are
-free against the rate limit) and converts `PushEvent`, `PullRequestEvent`, `IssuesEvent`, `ReleaseEvent`,
-`CreateEvent`, `DeleteEvent`, `ForkEvent` and `WatchEvent` into the same embeds. The Events API is delayed
-by 30 s–5 min and does not include workflow runs, reviews or comments — webhooks remain the primary mechanism, and
-both can run at once (events are keyed differently, so nothing is lost; you may see the odd duplicate push).
-On first start the poller records the newest event id and does not replay history.
+Two sources, both feeding the same pipeline (dedupe by delivery id, so running both is safe):
+
+- **Polling** (default on when `GITHUB_TOKEN` is set): every `GITHUB_POLL_INTERVAL_S` the bot reads the org event feed (push, PR, issues, releases, forks, stars, branches, members…) **and** each repo's recent workflow runs (the event feed never carries CI results). Nothing inbound needed. First run baselines silently — no history replay. Latency ≈ the poll interval.
+- **Org webhook** (optional, instant): github.com/organizations/&lt;org&gt;/settings/hooks → Add webhook → `https://<public-host>/github`, `application/json`, secret = `WEBHOOK_SECRET`, "Send me everything". Needs the bot's port reachable from GitHub (reverse proxy / Cloudflare Tunnel / Tailscale Funnel).
+
+Routing: `GITHUB_FEED_CHANNEL_ID` gets **every** event; CI results (`workflow_run`, `check_run`) go to `GITHUB_CI_CHANNEL_ID` instead (falls back to the feed); `GITHUB_REPO_CHANNEL_MAP` additionally mirrors a repo's non-CI events into its own channel. A failing workflow on a default branch also raises an alert in `ALERT_CHANNEL_ID` pinging `GITHUB_CI_FAILURE_ROLE_ID`, resolved in place when it goes green.
 
 ## Alerts & robustness
 

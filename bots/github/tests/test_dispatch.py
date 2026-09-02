@@ -73,7 +73,7 @@ async def test_pipeline(tmp_path):
     assert await d.dispatch("star", star(), delivery_id="d1") is True
     assert await d.dispatch("star", star(), delivery_id="d1") is False  # dedupe
     assert await d.dispatch("star", star("dependabot[bot]"), delivery_id="d2") is False  # bot filtered
-    assert len(bot.channels[123].sent) == 1 and not bot.channels[1].sent  # routed by repo map
+    assert len(bot.channels[123].sent) == 1 and len(bot.channels[1].sent) == 1  # feed + repo mirror
     assert d.activity_summary() == {"star": 1}
     assert len(d.recent()) == 1 and "starred by alice" in d.recent()[0]
 

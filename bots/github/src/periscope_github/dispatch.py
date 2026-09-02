@@ -105,19 +105,21 @@ class Dispatcher:
 
         self.bump(event)
         self.remember(one_liner(event, embed, when))
-        channel_id = self.cfg.channel_for(repo_name(payload), self.bot.settings.alert_channel_id)
-        if not channel_id:
+        targets = self.cfg.channels_for(repo_name(payload), event, self.bot.settings.alert_channel_id)
+        if not targets:
             log.warning("no feed channel configured (GITHUB_FEED_CHANNEL_ID / ALERT_CHANNEL_ID); dropping %s", event)
             return False
-        ch = await self.bot.get_channel_safe(channel_id)
-        if ch is None:
-            return False
-        try:
-            await ch.send(embed=embed)
-        except discord.HTTPException as e:
-            log.error("failed to post %s to channel %s: %s", event, channel_id, e)
-            return False
-        return True
+        posted = False
+        for channel_id in targets:
+            ch = await self.bot.get_channel_safe(channel_id)
+            if ch is None:
+                continue
+            try:
+                await ch.send(embed=embed)
+                posted = True
+            except discord.HTTPException as e:
+                log.error("failed to post %s to channel %s: %s", event, channel_id, e)
+        return posted
 
     async def _handle_ci(self, payload: dict[str, Any]) -> None:
         tr = ci_transition(payload)

@@ -116,6 +116,24 @@ ADAPTERS: dict[str, tuple[str, Any]] = {
 }
 
 
+def adapt_workflow_run(repo: str, run: dict[str, Any], org: str) -> dict[str, Any]:
+    """Actions API run -> webhook-shaped workflow_run payload (action=completed)."""
+    actor = run.get("triggering_actor") or run.get("actor") or {}
+    login = actor.get("login") or "?"
+    repo_obj = run.get("repository") or {}
+    return {
+        "action": "completed",
+        "workflow_run": run,
+        "workflow": {"name": run.get("name")},
+        "sender": {"login": login, "avatar_url": actor.get("avatar_url"), "html_url": f"{GITHUB}/{login}",
+                   "type": actor.get("type") or ("Bot" if login.endswith("[bot]") else "User")},
+        "repository": {"name": repo, "full_name": repo_obj.get("full_name") or f"{org}/{repo}",
+                       "html_url": repo_obj.get("html_url") or f"{GITHUB}/{org}/{repo}",
+                       "owner": {"login": org}, "default_branch": repo_obj.get("default_branch") or "main"},
+        "organization": {"login": org},
+    }
+
+
 def adapt(ev: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     """Map an Events-API item to (webhook_event_name, webhook_payload) or None if unsupported."""
     entry = ADAPTERS.get(ev.get("type", ""))
@@ -142,12 +160,15 @@ class GithubPoller(commands.Cog):
         if self.cfg.poll_enabled:
             self.poll.change_interval(seconds=self.cfg.poll_interval_s)
             self.poll.start()
-            log.info("polling /orgs/%s/events every %ss", self.cfg.org, self.cfg.poll_interval_s)
+            self.poll_ci.change_interval(seconds=max(self.cfg.poll_interval_s, 60))
+            self.poll_ci.start()
+            log.info("polling /orgs/%s/events + workflow runs every %ss", self.cfg.org, self.cfg.poll_interval_s)
         else:
             log.info("polling disabled (GITHUB_POLL_ENABLED=false)")
 
     async def cog_unload(self) -> None:
         self.poll.cancel()
+        self.poll_ci.cancel()
 
     @tasks.loop(seconds=120)
     async def poll(self) -> None:
@@ -184,6 +205,44 @@ class GithubPoller(commands.Cog):
                 log.exception("failed to dispatch polled event %s", ev.get("id"))
         if fresh:
             self.state.set("last_event_id", max(int(ev["id"]) for ev in fresh))
+
+    # ----- CI: the events feed never carries workflow runs, so poll them per repo ------------
+
+    @tasks.loop(seconds=120)
+    async def poll_ci(self) -> None:
+        try:
+            repos = [r["name"] for r in await self.client.list_repos() if not r.get("archived")]
+        except Exception as e:  # noqa: BLE001
+            await self.reach.failure(e)
+            return
+        seen: dict[str, int] = self.state.get("ci_seen", {}) or {}
+        first_run = not seen
+        for name in repos:
+            try:
+                runs = await self.client.workflow_runs(name, per_page=10)
+            except Exception:  # noqa: BLE001
+                log.debug("workflow runs unavailable for %s", name, exc_info=True)
+                continue
+            completed = [r for r in runs if r.get("status") == "completed"]
+            if not completed:
+                continue
+            newest = max(int(r["id"]) for r in completed)
+            last = int(seen.get(name, 0))
+            seen[name] = max(last, newest)
+            if first_run or last == 0:
+                continue  # baseline silently, never replay history
+            for run in sorted((r for r in completed if int(r["id"]) > last), key=lambda r: int(r["id"])):
+                payload = adapt_workflow_run(name, run, self.cfg.org)
+                try:
+                    await self.dispatcher.dispatch("workflow_run", payload, delivery_id=f"poll:run:{run['id']}",
+                                                   source="poll", when=parse_ts(run.get("updated_at")))
+                except Exception:  # noqa: BLE001
+                    log.exception("failed to dispatch polled workflow run %s", run.get("id"))
+        self.state.set("ci_seen", seen)
+
+    @poll_ci.before_loop
+    async def _wait_ci(self) -> None:
+        await self.bot.wait_until_ready()
 
     @poll.before_loop
     async def _wait(self) -> None:

@@ -47,7 +47,7 @@ SHARED = {
 BOT_SHARED_OVERRIDES = {
     "arr": {"MEDIA_CHANNEL_ID": "media"},
     "unifi": {"ALERT_CHANNEL_ID": "network"},
-    "github": {"GITHUB_FEED_CHANNEL_ID": "formicaria-git", "ALERT_CHANNEL_ID": "formicaria-ci",
+    "github": {"GITHUB_FEED_CHANNEL_ID": "formicaria-git", "GITHUB_CI_CHANNEL_ID": "formicaria-ci", "ALERT_CHANNEL_ID": "formicaria-ci",
                "ALERT_ROLE_ID": "@formicaria-dev", "GITHUB_CI_FAILURE_ROLE_ID": "@formicaria-dev"},
 }
 
@@ -442,7 +442,10 @@ def step_github(env: dict) -> None:
     if not env.get("WEBHOOK_SECRET"):
         env["WEBHOOK_SECRET"] = secrets.token_hex(24)
         ok("generated WEBHOOK_SECRET")
-    say(f"\n  Org webhook: github.com/organizations/{env['GITHUB_ORG']}/settings/hooks → Add webhook\n"
+    env["GITHUB_POLL_ENABLED"] = "true" if env.get("GITHUB_TOKEN") else "false"
+    if env.get("GITHUB_TOKEN"):
+        ok("polling on — the feed works with no inbound port; the webhook below is optional (instant delivery)")
+    say(f"\n  Optional org webhook: github.com/organizations/{env['GITHUB_ORG']}/settings/hooks → Add webhook\n"
         f"    Payload URL   https://<public-host>/github   (this bot listens on port {env.get('WEBHOOK_PORT', '8084')})\n"
         f"    Content type  application/json\n"
         f"    Secret        {env['WEBHOOK_SECRET']}\n"
