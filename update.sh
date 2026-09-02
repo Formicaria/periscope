@@ -13,8 +13,9 @@ sed "s|__DIR__|$DIR|g" periscope.cli > /usr/local/bin/periscope && chmod +x /usr
 sed "s|__DIR__|$DIR|g" periscope@.service > /etc/systemd/system/periscope@.service
 systemctl daemon-reload
 echo "==> restart enabled bots"
-for u in $(systemctl list-units --type=service --all --no-legend 'periscope@*' | awk '{print $1}'); do
-    systemctl is-enabled -q "$u" 2>/dev/null && systemctl restart "$u" && echo "    ↻ $u"
+for d in bots/*/; do
+    b="$(basename "$d")"
+    systemctl is-enabled -q "periscope@$b" 2>/dev/null && systemctl restart "periscope@$b" && echo "    ↻ periscope@$b"
 done
 sleep 2
 /usr/local/bin/periscope status
