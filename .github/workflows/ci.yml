@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bot: [core, proxmox, prometheus, arr, unifi, github]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e core pytest pytest-asyncio
+      - if: matrix.bot != 'core'
+        run: pip install -e bots/${{ matrix.bot }}
+      - run: python -m compileall -q core/src ${{ matrix.bot != 'core' && format('bots/{0}/src', matrix.bot) || '' }}
+      - run: pytest -q ${{ matrix.bot == 'core' && 'core' || format('bots/{0}', matrix.bot) }}
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n setup.sh update.sh periscope.cli deploy/lxc-create.sh

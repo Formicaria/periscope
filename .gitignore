@@ -1,0 +1,13 @@
+# secrets + runtime state — never commit
+bots/*/.env
+bots/*/data/
+data/
+venv/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

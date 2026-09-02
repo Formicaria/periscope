@@ -1,0 +1,67 @@
+#!/bin/bash
+# periscope CLI — installed to /usr/local/bin/periscope by setup.sh
+DIR="__DIR__"
+BOTS="$(ls "$DIR/bots")"
+
+need_bot() { [ -n "$1" ] || { echo "usage: periscope $CMD <bot>   (bots: $(echo $BOTS))"; exit 1; }
+             [ -d "$DIR/bots/$1" ] || { echo "unknown bot '$1' (bots: $(echo $BOTS))"; exit 1; }; }
+CMD="$1"; shift
+
+case "$CMD" in
+    list)
+        for b in $BOTS; do
+            st="$(systemctl is-active "periscope@$b" 2>/dev/null)"
+            en="$(systemctl is-enabled "periscope@$b" 2>/dev/null)"
+            cfg="no .env"; [ -f "$DIR/bots/$b/.env" ] && cfg=".env"
+            printf '  %-12s %-9s %-9s %s\n' "$b" "$st" "$en" "$cfg"
+        done ;;
+    init)
+        need_bot "$1"
+        if [ -f "$DIR/bots/$1/.env" ]; then echo "bots/$1/.env already exists"; else
+            cp "$DIR/bots/$1/.env.example" "$DIR/bots/$1/.env" && chmod 600 "$DIR/bots/$1/.env"
+            echo "created $DIR/bots/$1/.env — fill it in, then: periscope enable $1"; fi ;;
+    enable)
+        [ -n "$1" ] || need_bot ""
+        for b in "$@"; do
+            need_bot "$b"
+            [ -f "$DIR/bots/$b/.env" ] || { echo "$b: no .env — run: periscope init $b"; continue; }
+            grep -Eq '^DISCORD_TOKEN=.+' "$DIR/bots/$b/.env" || { echo "$b: DISCORD_TOKEN empty in bots/$b/.env"; continue; }
+            chmod 600 "$DIR/bots/$b/.env"; mkdir -p "$DIR/bots/$b/data"
+            systemctl enable --now "periscope@$b" && echo "$b enabled."
+        done ;;
+    disable)
+        [ -n "$1" ] || need_bot ""
+        for b in "$@"; do need_bot "$b"; systemctl disable --now "periscope@$b" && echo "$b disabled."; done ;;
+    update)  exec bash "$DIR/update.sh" ;;
+    logs)    if [ -n "$1" ]; then need_bot "$1"; exec journalctl -u "periscope@$1" -f; else exec journalctl -u 'periscope@*' -f; fi ;;
+    status)  if [ -n "$1" ]; then need_bot "$1"; exec systemctl --no-pager status "periscope@$1"; else
+             for b in $BOTS; do printf '  %-12s %s\n' "$b" "$(systemctl is-active "periscope@$b" 2>/dev/null)"; done; fi ;;
+    restart) if [ -n "$1" ]; then for b in "$@"; do need_bot "$b"; systemctl restart "periscope@$b" && echo "$b restarted."; done; else
+             for b in $BOTS; do systemctl is-active -q "periscope@$b" >/dev/null 2>&1 && systemctl restart "periscope@$b" && echo "$b restarted."; done; fi ;;
+    config)  need_bot "$1"
+             grep -Ev '^\s*(#|$)' "$DIR/bots/$1/.env" | sed -E 's/^([A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD|PASS)[A-Z0-9_]*=).+/\1********/' ;;
+    *)
+        "$DIR/venv/bin/python" - <<'PY'
+from periscope.banner import BANNER, __version__
+print(BANNER)
+print(f"  periscope v{__version__} — homelab monitoring bots for Discord, pick what you run")
+PY
+        cat <<USAGE
+
+  usage: periscope <command> [bot]
+
+    list              every bot with active/enabled/.env state
+    init <bot>        create bots/<bot>/.env from the example
+    enable <bot...>   start the bot now and on boot (needs a filled .env)
+    disable <bot...>  stop it and remove it from boot
+    status [bot]      service status
+    logs [bot]        follow the live logs (all bots when omitted)
+    restart [bot...]  restart one bot, or all running ones
+    config <bot>      show the active .env with secrets masked
+    update            git pull, reinstall, restart every enabled bot
+
+  bots: $(echo $BOTS)
+
+USAGE
+        ;;
+esac
