@@ -17,9 +17,13 @@ case "$CMD" in
         done ;;
     init)
         need_bot "$1"
-        if [ -f "$DIR/bots/$1/.env" ]; then echo "bots/$1/.env already exists"; else
+        if [ "$2" = "--manual" ]; then
+            [ -f "$DIR/bots/$1/.env" ] && { echo "bots/$1/.env already exists"; exit 0; }
             cp "$DIR/bots/$1/.env.example" "$DIR/bots/$1/.env" && chmod 600 "$DIR/bots/$1/.env"
-            echo "created $DIR/bots/$1/.env — fill it in, then: periscope enable $1"; fi ;;
+            echo "created $DIR/bots/$1/.env — fill it in, then: periscope enable $1"
+        else
+            exec "$DIR/venv/bin/python" -m periscope.wizard "$DIR" "$1"
+        fi ;;
     enable)
         [ -n "$1" ] || need_bot ""
         for b in "$@"; do
@@ -51,7 +55,8 @@ PY
   usage: periscope <command> [bot]
 
     list              every bot with active/enabled/.env state
-    init <bot>        create bots/<bot>/.env from the example
+    init <bot>        guided setup: verifies each credential, creates channels/roles, writes .env, starts the bot
+                      (add --manual to just copy the example .env and edit it yourself)
     enable <bot...>   start the bot now and on boot (needs a filled .env)
     disable <bot...>  stop it and remove it from boot
     status [bot]      service status

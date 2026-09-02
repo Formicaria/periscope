@@ -1,5 +1,6 @@
 # secrets + runtime state — never commit
 bots/*/.env
+periscope.json
 bots/*/data/
 data/
 venv/

@@ -31,12 +31,12 @@ git clone https://github.com/formicaria/periscope /opt/periscope
 cd /opt/periscope
 bash setup.sh                      # python + venv + all bots + `periscope` CLI. Enables nothing yet.
 
-periscope init proxmox             # creates bots/proxmox/.env from the example
-nano bots/proxmox/.env             # DISCORD_TOKEN, channel IDs, service credentials — see comments
-periscope enable proxmox           # starts it now and on boot
+periscope init proxmox             # guided setup — see below
 ```
 
-Repeat `init` / `enable` for every bot you want (`proxmox prometheus arr unifi github`). Each bot's `.env` and `data/` stay inside `bots/<bot>/` and are gitignored. `setup.sh` is idempotent: re-running it (or `periscope update`) re-enables every bot whose `.env` has a token.
+`periscope init <bot>` walks you through it and checks every answer before saving: paste the bot token (verified against Discord, prints the invite link if the bot isn't in a server yet), it finds or **creates the channels and roles** it needs, asks for the service credentials (Proxmox token, *arr keys, UniFi login, GitHub PAT…) and tests each one against the real service, writes `bots/<bot>/.env`, and starts the bot. Shared answers (server, channels, roles, lab name) are remembered in `periscope.json`, so the second bot only asks for its own token and credentials. Repeat for every bot you want (`proxmox prometheus arr unifi github`). Prefer editing by hand? `periscope init <bot> --manual` copies the example `.env` for you.
+
+Each bot's `.env` and `data/` stay inside `bots/<bot>/` and are gitignored. `setup.sh` is idempotent: re-running it (or `periscope update`) re-enables every bot whose `.env` has a token.
 
 ### Proxmox LXC in one command
 
@@ -63,7 +63,7 @@ Images: `ghcr.io/formicaria/periscope-<bot>:latest` (amd64 + arm64), or uncommen
 
 ```
 periscope list              every bot with active / enabled / .env state
-periscope init <bot>        create bots/<bot>/.env from the example
+periscope init <bot>        guided setup (verifies credentials, creates channels/roles, starts the bot); --manual to skip
 periscope enable <bot…>     start now + on boot (needs a filled .env)
 periscope disable <bot…>    stop and remove from boot
 periscope status [bot]      service status
@@ -77,9 +77,7 @@ Every future update: `git push` from your machine, then `periscope update` on th
 
 ## Discord setup (once per bot)
 
-1. <https://discord.com/developers/applications> → **New Application** (name it after the service, e.g. `Proxmox`) → **Bot** → **Reset Token** → `DISCORD_TOKEN`. No privileged intents are needed.
-2. **OAuth2 → URL Generator**: scopes `bot` + `applications.commands`; permissions *Send Messages, Embed Links, Attach Files, Read Message History, Manage Messages* (pins the status board), *Mention Everyone* only if you want role pings. Open the URL, add it to your server.
-3. Enable *Settings → Advanced → Developer Mode*, right-click → **Copy ID** for `GUILD_ID`, `STATUS_CHANNEL_ID`, `ALERT_CHANNEL_ID`, `ALERT_ROLE_ID`, `ADMIN_ROLE_IDS`.
+The only thing you do in the Discord developer portal: <https://discord.com/developers/applications> → **New Application** (name it after the service, e.g. `Proxmox`) → **Bot** → **Reset Token**. No privileged intents are needed. `periscope init` takes it from there — it prints the invite link with the right permissions, detects the server once the bot joins, and creates or finds the channels and roles. (Doing it by hand instead: OAuth2 → URL Generator, scopes `bot` + `applications.commands`; then Developer Mode → right-click → Copy ID for every `*_ID` in `.env.example`.)
 
 Service-side steps (API tokens, webhooks) are in each bot's README. For THE LAB specifically: [`docs/discord-apps.md`](docs/discord-apps.md) has the existing applications and invite links, [`docs/server-layout.md`](docs/server-layout.md) the channel plan, and `scripts/setup_server.py` creates those channels and roles idempotently.
 
