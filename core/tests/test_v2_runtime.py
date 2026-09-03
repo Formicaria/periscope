@@ -106,13 +106,24 @@ def test_settings_from_example(tmp_path):
     assert keys["PVE_URL"].group == "Proxmox"
 
 
+def fake_spec(name, *intents, settings=()):
+    """A service spec with no package behind it — core tests must not depend on which bots are installed."""
+
+    async def build(bot):
+        pass
+
+    return ServiceSpec(name=name, title=name, description="", group="infra", settings=list(settings), build=build,
+                       intents=list(intents))
+
+
 @pytest.mark.asyncio
 async def test_runtime_assembles_and_builds_proxmox(tmp_path, monkeypatch):
+    """Integration with the real proxmox service package (skipped where only core is installed, e.g. CI's core job)."""
+    pytest.importorskip("periscope_proxmox")
     write_v1(tmp_path)
     s = Store(tmp_path / "config" / "periscope.yaml")
     migrate_v1(s, tmp_path)
     s.save()
-    # only proxmox is installed in this test environment's registry? both are — restrict to keep the test focused
     for name in list(s.services):
         if name != "proxmox":
             s.services[name]["enabled"] = False
@@ -142,9 +153,12 @@ async def test_runtime_skips_broken_config(tmp_path):
     s.services["nope"] = {"enabled": True, "presence": "default", "env": {}}
     s.services["sonarr"] = {"enabled": True, "presence": "ghost", "env": {}}                          # unknown presence → default token ok
     rt = Runtime(s, tmp_path)
+    rt.specs = {"proxmox": fake_spec("proxmox", settings=[Setting("PVE_URL", required=True), Setting("PVE_TOKEN_SECRET", required=True)]),
+                "sonarr": fake_spec("sonarr")}
     rt.assemble()
     assert "proxmox" not in rt.services and rt.skipped["proxmox"].startswith("needs ")
     assert "not installed" in rt.skipped["nope"]
+    assert "sonarr" in rt.services and rt.services["sonarr"].presence.name == "default"
     st = rt.status()
     assert st["services"]["proxmox"]["state"] == "needs setup" and st["services"]["proxmox"]["fix"] == "settings"
 
@@ -164,23 +178,17 @@ def test_runtime_unions_service_intents_per_presence(tmp_path):
     migrate_v1(s, tmp_path)
     for name in list(s.services):
         s.services[name]["enabled"] = name in ("proxmox", "sonarr")
-
-    async def build(bot):
-        pass
-
-    def spec(name, *intents, settings=()):
-        return ServiceSpec(name=name, title=name, description="", group="infra", settings=list(settings), build=build,
-                           intents=list(intents))
-
     s.services["needy"] = {"enabled": True, "presence": "proxmox", "env": {}}                 # shares the proxmox presence
     s.services["skipped"] = {"enabled": True, "presence": "arr", "env": {}}                   # missing a required key
     s.services["quiet"] = {"enabled": True, "presence": "arr", "env": {}}
     rt = Runtime(s, tmp_path)
-    rt.specs.update({
-        "needy": spec("needy", "members", "message_content"),
-        "skipped": spec("skipped", "presences", settings=[Setting("X_URL", required=True)]),
-        "quiet": spec("quiet"),
-    })
+    rt.specs = {
+        "proxmox": fake_spec("proxmox"),
+        "sonarr": fake_spec("sonarr"),
+        "needy": fake_spec("needy", "members", "message_content"),
+        "skipped": fake_spec("skipped", "presences", settings=[Setting("X_URL", required=True)]),
+        "quiet": fake_spec("quiet"),
+    }
     rt.assemble()
     assert set(rt.services) == {"proxmox", "needy", "sonarr", "quiet"} and rt.skipped["skipped"].startswith("needs ")
     pve, arr = rt.presences["proxmox"], rt.presences["arr"]

@@ -11,10 +11,10 @@ jobs:
       matrix:
         bot: [core, proxmox, prometheus, arr, unifi, github, plexrequests, web]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.13"   # what the box runs (Debian trixie)
       - run: pip install -e core pytest pytest-asyncio
       - if: matrix.bot != 'core'
         run: pip install -e ${{ matrix.bot == 'web' && 'web' || format('bots/{0}', matrix.bot) }}
@@ -23,5 +23,5 @@ jobs:
   scripts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: bash -n setup.sh update.sh periscope.cli deploy/lxc-create.sh
