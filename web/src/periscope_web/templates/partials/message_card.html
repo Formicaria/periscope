@@ -1,0 +1,34 @@
+<div class="card bg-base-200 shadow-sm {% if not card.enabled %}opacity-70{% endif %}" id="msg-{{ card.slug }}" data-search="{{ card.search }}">
+  <div class="card-body p-4 gap-2">
+    <div class="flex items-start gap-2">
+      <div class="min-w-0">
+        <h3 class="card-title text-base leading-tight">
+          <a href="/messages/{{ card.key }}" class="link link-hover">{{ card.title }}</a>
+        </h3>
+        <p class="text-xs opacity-70 mt-1">{{ card.description }}</p>
+      </div>
+      <div class="ml-auto flex flex-col items-end gap-1">
+        {% if not card.enabled %}<span class="badge badge-ghost badge-sm" title="the bot posts nothing for this">switched off</span>{% endif %}
+        {% if card.customised %}<span class="badge badge-primary badge-sm" title="your wording, not the one the service ships">reworded</span>{% endif %}
+      </div>
+    </div>
+    {% if card.where %}<div class="text-xs opacity-60">goes to {{ card.where }}</div>{% endif %}
+    <div class="mt-1">
+      {% if card.error %}
+      <div class="alert alert-error py-2 px-3 text-xs"><span class="break-words">{{ card.error }}</span></div>
+      {% else %}
+      {% with embed = card.embed %}{% include "partials/embed_preview.html" %}{% endwith %}
+      {% endif %}
+    </div>
+    <div class="card-actions justify-end items-center mt-1">
+      <span class="mono text-[10px] opacity-40 mr-auto">{{ card.key }}</span>
+      {% if card.customised %}
+      <button class="btn btn-ghost btn-xs" hx-post="/messages/{{ card.key }}/reset" hx-target="#msg-{{ card.slug }}" hx-swap="outerHTML"
+              title="back to the wording the service ships">Reset</button>
+      {% endif %}
+      <button class="btn btn-ghost btn-xs" hx-post="/messages/{{ card.key }}/toggle" hx-target="#msg-{{ card.slug }}" hx-swap="outerHTML"
+              title="{{ 'the bot posts this again' if not card.enabled else 'the bot stops posting this' }}">{{ 'Switch on' if not card.enabled else 'Switch off' }}</button>
+      <a href="/messages/{{ card.key }}" class="btn btn-primary btn-xs">Edit</a>
+    </div>
+  </div>
+</div>

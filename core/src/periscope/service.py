@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from .alerts import AlertRouter
 from .config import Settings
+from .messages import Messages, MessageStore
 from .state import JsonState, NamespacedState
 
 if TYPE_CHECKING:
@@ -138,7 +139,7 @@ class ServiceBot:
     """What a service's cogs see as `bot`. Same attribute surface as v1's LabBot, backed by a shared presence."""
 
     def __init__(self, spec: ServiceSpec, presence: "Presence", settings: Settings, env: dict[str, str],
-                 state: JsonState, webhook: "WebhookServer | None"):
+                 state: JsonState, webhook: "WebhookServer | None", messages: MessageStore | None = None):
         self.spec = spec
         self.name = spec.name
         self.presence = presence
@@ -148,6 +149,8 @@ class ServiceBot:
         self.state: NamespacedState = state.namespace(f"svc:{spec.name}")
         # one slot every service on this presence can see — for boards several services render together
         self.shared_state: NamespacedState = state.namespace(f"presence:{presence.name}")
+        # the user's customisations of this service's posts (config/messages.yaml), applied at send time
+        self.messages = Messages(messages, service=spec.name, lab=settings.lab_name)
         self.alerts = AlertRouter(self)
         self.webhook = webhook
         self.description = spec.description

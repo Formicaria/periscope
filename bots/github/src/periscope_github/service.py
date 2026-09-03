@@ -8,7 +8,7 @@ from pathlib import Path
 from periscope import ServiceBot, ServiceSpec, env_scope, settings_from_example
 from periscope.http import HttpClient, HttpError
 
-from . import COGS
+from . import COGS, messages  # noqa: F401  — importing messages registers the github.* message kinds
 from .client import GithubClient
 from .config import GithubSettings
 

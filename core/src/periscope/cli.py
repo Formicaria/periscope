@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from .config import Settings, env_scope
+from .embeds import truncate
 from .net import web_url
 from .registry import discover
 from .store import Store, is_secret_key
@@ -46,7 +47,8 @@ def cmd_list(store: Store, root: Path, args: list[str]) -> int:
             _say(f"    bot {n:<10} {'online' + who if p.get('connected') else 'OFFLINE — ' + str(p.get('error') or 'connecting')}")
     else:
         _say("  runtime not running (periscope start)")
-    _say("    " + "STATE".ljust(13) + "SERVICE".ljust(15) + "BOT".ljust(11) + "TITLE")
+    multi = len(store.servers) > 1
+    _say("    " + "STATE".ljust(13) + "SERVICE".ljust(15) + "BOT".ljust(11) + ("SERVER".ljust(12) if multi else "") + "TITLE")
     names = sorted(set(specs) | set(store.services), key=lambda n: (specs[n].group if n in specs else "zzz", n))
     problems: list[str] = []
     for name in names:
@@ -59,7 +61,9 @@ def cmd_list(store: Store, root: Path, args: list[str]) -> int:
         icon = STATE_ICON.get(state, "?")
         title = specs[name].title if name in specs else name + " (not installed)"
         bot = store.presence_for(name) if cfg.get("enabled") else "-"
-        _say(f"  {icon} {state:<13}{name:<15}{bot:<11}{title}")
+        where = ((store.servers[store.server_for(name)].get("name") or store.server_for(name)) if cfg.get("enabled") else "-") if multi else ""
+        col = (truncate(where, 12) if multi else "").ljust(12 if multi else 0)
+        _say(f"  {icon} {state:<13}{name:<15}{bot:<11}{col}{title}")
         if cfg.get("enabled") and live.get("error") and state != "starting":
             where = FIX_PAGE.get(live.get("fix") or "", "")
             problems.append(f"{name}: {live['error']}" + (f"  → {where}" if where else ""))
@@ -152,7 +156,9 @@ def cmd_presence(store: Store, root: Path, args: list[str]) -> int:
     if not args:
         for n, p in store.presences.items():
             users = [s for s in store.services if store.presence_for(s) == n]
-            _say(f"  {n:<10} token={'set' if p.get('token') else 'MISSING'}  label={p.get('label', n)}  services: {', '.join(users) or '-'}")
+            servers = sorted({store.servers[store.server_for(s)].get("name") or store.server_for(s) for s in users})
+            _say(f"  {n:<10} token={'set' if p.get('token') else 'MISSING'}  label={p.get('label', n)}  "
+                 f"services: {', '.join(users) or '-'}" + (f"  servers: {', '.join(servers)}" if len(store.servers) > 1 and servers else ""))
         _say("  periscope presence add <name> | token <name> | use <service> <name>")
         return 0
     sub = args[0]
@@ -222,7 +228,7 @@ def cmd_web(store: Store, root: Path, args: list[str]) -> int:
     elif not store.web.get("oauth_client_id"):
         _say("  the one-time sign-in link was already used; restart to get a new one (periscope restart), or set up Discord sign-in on the Discord page")
     else:
-        _say("  sign in with Discord (an account holding an admin role in the lab server)")
+        _say("  sign in with Discord (an account holding an admin role in the server)")
     return 0
 
 
@@ -248,20 +254,20 @@ def cmd_init(store: Store, root: Path, args: list[str]) -> int:
 
     gl = asyncio.run(guilds())
     if len(gl) == 1:
-        store.lab["guild_id"] = gl[0]["id"]
+        store.server()["guild_id"] = gl[0]["id"]
         _say(f"  ✔ server: {gl[0]['name']}")
     elif gl:
         for i, g in enumerate(gl, 1):
             _say(f"    {i}. {g['name']} ({g['id']})")
         pick = input("  which server: ").strip()
-        store.lab["guild_id"] = gl[int(pick) - 1]["id"] if pick.isdigit() else gl[0]["id"]
+        store.server()["guild_id"] = gl[int(pick) - 1]["id"] if pick.isdigit() else gl[0]["id"]
     else:
         app_id = who.split("app id ")[-1].rstrip(")")
         _say(f"  the bot is not in a server yet — invite it: https://discord.com/oauth2/authorize?client_id={app_id}"
              f"&scope=bot%20applications.commands&permissions=268659728")
-    name = input(f"  lab name shown in embeds [{store.lab.get('name') or socket.gethostname()}]: ").strip()
+    name = input(f"  server name shown in embeds [{store.server().get('name') or socket.gethostname()}]: ").strip()
     if name:
-        store.lab["name"] = name
+        store.server()["name"] = name
     store.save()
     _say("  saved. Start the runtime (periscope start) and finish in the web UI: periscope web")
     return 0

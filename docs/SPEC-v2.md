@@ -23,9 +23,18 @@ periscope (one systemd service, one process)
   default is one shared presence ("periscope"); any service can be given its own token (e.g. keep the
   existing Proxmox / Arr / Unifi / Github apps) so its posts carry that name and avatar. Presences are
   multiplexed gateway clients in the same process.
-- **One config store.** `config/periscope.yaml` (secrets in `config/secrets.env`, 0600) replaces the per-bot
-  `.env` files. The web UI and the CLI both read/write it; the wizard becomes the web UI's first-run flow.
-  A migration step imports every existing `bots/*/.env` on first start.
+- **One config store.** `config/periscope.yaml` (mode 0600) replaces the per-bot `.env` files. The web UI and
+  the CLI both read/write it; the wizard becomes the web UI's first-run flow. A migration step imports every
+  existing `bots/*/.env` on first start.
+- **Many Discord servers.** `servers:` in that file holds one entry per Discord server (name, colour, id,
+  status/alert channels, admin roles); every service names the server it posts in, and a bot serves every server
+  its services use, registering its slash commands in each. Settings that are not per-server (log level, board
+  refresh) live in their own block.
+- **Every post is a template.** Each service registers its posts as *message kinds* with sample data
+  (`core/src/periscope/messages.py`); the Messages page previews them as Discord draws them and lets a user
+  reword, recolour, restructure or switch off any of them. Customisations live in `config/messages.yaml` and
+  apply to the next post — no restart, no code change. A broken template never blocks a post: the bot's own
+  version goes out and the error is logged.
 - **Channels by convention** (unchanged): `#lab-status` boards, `#lab-alerts`, `#media`, `#network`,
   `#git-<project>` per-repo feeds + CI trains, `#op-*` humans only. `periscope layout` applies permissions.
 
@@ -100,7 +109,9 @@ Pages:
 2. **Service settings** — the typed `settings` of that service rendered as a form (secrets masked, "Test" runs `check()` live, channel/role pickers pull the guild's channels/roles by name). Save = validate → write config → hot-reload that service only.
 3. **Bots** — presences in the config: tokens (checked against Discord), invite links, which services post as which, why one is offline. **Discord** — lab settings, web sign-in, channel convention with a "create missing" button, `periscope layout` as a button.
 4. **Feeds & routing** — the GitHub repo→channel map as a table (repo · channel · CI channel · mirror), alert routing (severity → channel, role to ping).
-5. **Logs** — live tail per service (websocket), download.
+5. **Logs** — live tail per service (SSE), download.
+5b. **Messages** — every kind of post the bots make, previewed the way Discord draws it, editable as a form
+   (Simple) or as the raw template (Code), with a live preview, reset, switch-off and a test post.
 6. **First run** — `periscope web` prints a one-time sign-in link; then: paste Discord token → invite link → pick server → create channels → add services one by one, each with Test.
 
 ### Stack options

@@ -13,9 +13,9 @@ from .guild import Channel, Role
 SHARED_GROUP = "Discord routing"
 TRUE = ("1", "true", "yes", "on")
 
-# lab keys behind the shared settings, for the "lab default" hint
-LAB_FIELD = {"STATUS_CHANNEL_ID": "status_channel_id", "ALERT_CHANNEL_ID": "alert_channel_id",
-             "ALERT_ROLE_ID": "alert_role_id", "STATUS_INTERVAL_S": "status_interval_s"}
+# store fields behind the shared settings, for the "server default" hint (the last one is not per-server)
+SERVER_FIELD = {"STATUS_CHANNEL_ID": "status_channel_id", "ALERT_CHANNEL_ID": "alert_channel_id",
+                "ALERT_ROLE_ID": "alert_role_id", "STATUS_INTERVAL_S": "status_interval_s"}
 
 
 @dataclass
@@ -31,7 +31,7 @@ class Field:
     is_set: bool = False                      # secrets: a value exists (never rendered)
     options: list[tuple[str, str]] = field(default_factory=list)   # (value, label) for selects
     shared: bool = False
-    lab_default: str = ""                     # human hint for shared keys
+    server_default: str = ""                  # human hint for shared keys
     unknown_option: str = ""                  # current value not in options → kept as an extra option
 
     @property
@@ -47,24 +47,28 @@ class Field:
         return self.value.strip().lower() in TRUE
 
 
-def _lab_hint(store, key: str, channels: list[Channel], roles: list[Role]) -> str:
-    lab_key = LAB_FIELD.get(key)
-    if not lab_key:
+def _server_hint(store, key: str, channels: list[Channel], roles: list[Role], server: str | None = None) -> str:
+    """What this key falls back to when the service leaves it empty: the service's own server's setting."""
+    field = SERVER_FIELD.get(key)
+    if not field:
         return ""
-    v = str(store.lab.get(lab_key) or "").strip()
+    if field == "status_interval_s":                       # shared by every server, not one server's setting
+        v = str(store.globals.get(field) or "").strip()
+        return f"default: {v}" if v else ""
+    v = str(store.server(server).get(field) or "").strip()
     if not v:
-        return "no lab default"
+        return "no server default"
     if key.endswith("_CHANNEL_ID"):
         name = next((c.name for c in channels if c.id == v), "")
-        return f"lab default: #{name}" if name else f"lab default: {v}"
+        return f"server default: #{name}" if name else f"server default: {v}"
     if key.endswith("_ROLE_ID"):
         name = next((r.name for r in roles if r.id == v), "")
-        return f"lab default: @{name}" if name else f"lab default: {v}"
-    return f"lab default: {v}"
+        return f"server default: @{name}" if name else f"server default: {v}"
+    return f"server default: {v}"
 
 
 def build_field(s: Setting, env: dict[str, str], *, channels: list[Channel], roles: list[Role], shared: bool = False,
-                store=None) -> Field:
+                store=None, server: str | None = None) -> Field:
     raw = str(env.get(s.key, "") or "")
     f = Field(s.key, s.label, s.type, required=s.required, help=s.help, group=s.group, shared=shared)
     if s.type == "secret":
@@ -90,17 +94,18 @@ def build_field(s: Setting, env: dict[str, str], *, channels: list[Channel], rol
     if f.options and f.value and f.value not in {v for v, _ in f.options}:
         f.unknown_option = f.value
     if shared and store is not None:
-        f.lab_default = _lab_hint(store, s.key, channels, roles)
+        f.server_default = _server_hint(store, s.key, channels, roles, server)
     return f
 
 
-def build_fields(spec: ServiceSpec, env: dict[str, str], *, channels: list[Channel], roles: list[Role], store=None
-                 ) -> list[tuple[str, list[Field]]]:
+def build_fields(spec: ServiceSpec, env: dict[str, str], *, channels: list[Channel], roles: list[Role], store=None,
+                 server: str | None = None) -> list[tuple[str, list[Field]]]:
     """Fields grouped as [(group title, [Field, ...]), ...] in first-seen order; shared settings last."""
     groups: dict[str, list[Field]] = {}
     for s in spec.settings:
         groups.setdefault(s.group or spec.title, []).append(build_field(s, env, channels=channels, roles=roles))
-    groups[SHARED_GROUP] = [build_field(s, env, channels=channels, roles=roles, shared=True, store=store) for s in SHARED_SETTINGS]
+    groups[SHARED_GROUP] = [build_field(s, env, channels=channels, roles=roles, shared=True, store=store, server=server)
+                            for s in SHARED_SETTINGS]
     return list(groups.items())
 
 

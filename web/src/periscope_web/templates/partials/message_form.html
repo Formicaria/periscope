@@ -1,0 +1,130 @@
+{% macro field_row(i, name, value, inline) %}
+<div class="field-row grid gap-2 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto_auto] items-center">
+  <input type="hidden" name="field_row" value="{{ i }}">
+  <input type="text" name="field_name" value="{{ name }}" class="input input-bordered input-sm" placeholder="Field name">
+  <input type="text" name="field_value" value="{{ value }}" class="input input-bordered input-sm" placeholder="Field value">
+  <label class="label cursor-pointer gap-2 py-0" title="side by side with the next field">
+    <input type="checkbox" name="field_inline_{{ i }}" value="true" class="checkbox checkbox-sm" {% if inline %}checked{% endif %}>
+    <span class="label-text text-xs">inline</span>
+  </label>
+  <button type="button" class="btn btn-ghost btn-xs" data-remove-row aria-label="remove this field">✕</button>
+</div>
+{% endmacro %}
+<form id="message-form" method="post" action="/messages/{{ key }}" hx-post="/messages/{{ key }}" hx-target="#message-form"
+      hx-swap="outerHTML" class="space-y-4" autocomplete="off">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="mode" id="m-mode" value="{{ mode }}">
+  <input type="hidden" name="passthrough" id="m-pass" value="{{ simple.passthrough }}">
+
+  {% if errors %}
+  <div class="alert alert-error py-2 text-sm"><ul class="list-disc list-inside">{% for e in errors %}<li class="break-words">{{ e }}</li>{% endfor %}</ul></div>
+  {% endif %}
+
+  <section class="card bg-base-200 shadow-sm"><div class="card-body p-4 gap-2">
+    <h3 class="text-xs uppercase tracking-widest opacity-60">What you can use</h3>
+    <p class="text-xs opacity-70">Click one to drop it into whatever box you were typing in. It is replaced by the real value when the bot posts.</p>
+    <div class="flex flex-wrap gap-1.5 mt-1">
+      {% for v in variables %}
+      <button type="button" class="badge badge-ghost badge-sm mono hover:badge-primary cursor-pointer" data-var="{{ v.token }}"
+              title="{{ v.meaning }}">{{ v.token }}</button>
+      {% endfor %}
+    </div>
+  </div></section>
+
+  <div role="tablist" class="tabs tabs-boxed w-fit">
+    <a role="tab" class="tab {% if mode != 'code' %}tab-active{% endif %}" data-tab="simple">Simple</a>
+    <a role="tab" class="tab {% if mode == 'code' %}tab-active{% endif %}" data-tab="code">Code</a>
+  </div>
+
+  <section data-pane="simple" class="card bg-base-200 shadow-sm {% if mode == 'code' %}hidden{% endif %}">
+    <div class="card-body p-4 gap-3">
+      {% if simple.beyond %}
+      <div class="alert alert-warning py-2 px-3 text-xs">
+        <span>This message does more than these boxes can show ({{ simple.beyond | join(', ') }}). Saving from here keeps the rest
+          but drops that — use the Code tab to keep it.</span>
+      </div>
+      {% endif %}
+      <div class="form-control">
+        <label class="label py-1" for="m-title"><span class="label-text text-sm">Title</span>
+          <span class="label-text-alt opacity-40 text-[10px]">up to {{ limits.title }} characters</span></label>
+        <input type="text" id="m-title" name="title" value="{{ simple.title }}" class="input input-bordered input-sm">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="m-description"><span class="label-text text-sm">Message</span>
+          <span class="label-text-alt opacity-40 text-[10px]">**bold**, *italic*, `code`, [link](url)</span></label>
+        <textarea id="m-description" name="description" rows="4" class="textarea textarea-bordered text-sm">{{ simple.description }}</textarea>
+      </div>
+      <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
+        <div class="form-control">
+          <label class="label py-1" for="m-color-mode"><span class="label-text text-sm">Colour</span></label>
+          <select id="m-color-mode" name="color_mode" class="select select-bordered select-sm">
+            <option value="auto" {% if simple.color_mode == 'auto' %}selected{% endif %}>keep the bot's colour</option>
+            <option value="custom" {% if simple.color_mode == 'custom' %}selected{% endif %}>pick a colour</option>
+            {% for s in severities %}
+            <option value="{{ s }}" {% if simple.color_mode == s %}selected{% endif %}>{{ s }} (the severity colour)</option>
+            {% endfor %}
+          </select>
+          <div id="m-color-wrap" class="join mt-2 {% if simple.color_mode != 'custom' %}hidden{% endif %}">
+            <input type="color" id="m-color-pick" value="{{ simple.color_hex }}" class="join-item h-8 w-10 border border-base-300 bg-base-100"
+                   aria-label="colour picker">
+            <input type="text" id="m-color-hex" name="color_hex" value="{{ simple.color_hex }}" class="input input-bordered input-sm join-item mono w-32"
+                   pattern="#?[0-9a-fA-F]{6}" placeholder="#5865F2">
+          </div>
+        </div>
+        <div class="form-control">
+          <label class="label py-1" for="m-footer"><span class="label-text text-sm">Footer</span>
+            <span class="label-text-alt opacity-40 text-[10px]">the small grey line</span></label>
+          <input type="text" id="m-footer" name="footer" value="{{ simple.footer }}" class="input input-bordered input-sm">
+        </div>
+      </div>
+      <div class="divider my-1 text-xs opacity-50">Fields</div>
+      <label class="label cursor-pointer justify-start gap-3 py-1">
+        <input type="checkbox" id="m-keep" name="keep_fields" value="true" class="toggle toggle-sm" {% if simple.keep_fields %}checked{% endif %}>
+        <span class="label-text text-sm">Keep the bot's own fields</span>
+        <span class="label-text-alt opacity-60 text-xs">whatever it worked out for this post</span>
+      </label>
+      <div id="m-fields" class="space-y-2">
+        {% for f in simple.fields %}{{ field_row(loop.index0, f.name, f.value, f.inline) }}{% endfor %}
+      </div>
+      <div>
+        <button type="button" class="btn btn-ghost btn-xs" data-add-field>+ Add a field</button>
+        <span class="text-xs opacity-50 ml-2">Discord shows at most {{ max_fields }}.</span>
+      </div>
+      <template id="m-field-row">{{ field_row('__i__', '', '', false) }}</template>
+    </div>
+  </section>
+
+  <section data-pane="code" class="card bg-base-200 shadow-sm {% if mode != 'code' %}hidden{% endif %}">
+    <div class="card-body p-4 gap-3">
+      <textarea id="m-code" name="code" rows="18" class="textarea textarea-bordered w-full mono text-xs leading-relaxed"
+                spellcheck="false">{{ code }}</textarea>
+      <div class="text-xs opacity-70 space-y-1">
+        <p><span class="mono">title</span>, <span class="mono">description</span>, <span class="mono">url</span>,
+          <span class="mono">color</span>, <span class="mono">fields</span>, <span class="mono">footer</span>,
+          <span class="mono">thumbnail</span>, <span class="mono">image</span>, <span class="mono">author</span>,
+          <span class="mono">timestamp</span>, <span class="mono">if</span> — an embed, with the strings written as templates.</p>
+        <p><span class="mono">{{ '{{ variable }}' }}</span> puts a value in; add
+          <span class="mono">|cut(80)</span>, <span class="mono">|bytes</span>, <span class="mono">|duration</span>,
+          <span class="mono">|bar</span> or <span class="mono">|dot</span> to shape it.</p>
+        <p><span class="mono">"if"</span> on the whole thing, or on one field, drops it when the condition is false;
+          <span class="mono">"repeat": "fields"</span> on a field emits it once per item (<span class="mono">item</span>,
+          <span class="mono">loop</span>).</p>
+        <p><span class="mono">"color"</span>: <span class="mono">auto</span> keeps the bot's, or
+          <span class="mono">#5865F2</span>, or {{ severities | join(' · ') }}.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="flex flex-wrap items-center gap-2 sticky bottom-0 py-3 bg-base-100/90 backdrop-blur border-t border-base-300/60">
+    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    <button type="button" class="btn btn-ghost btn-sm" hx-post="/messages/{{ key }}/test" hx-include="#message-form" hx-swap="none"
+            hx-indicator="this" title="post this to {{ where_env or 'the alert channel' }} right now">
+      <span class="htmx-indicator loading loading-spinner loading-xs"></span>Send a test post
+    </button>
+    {% if customised %}
+    <button type="button" class="btn btn-ghost btn-sm" hx-post="/messages/{{ key }}/reset" hx-vals='{"scope": "editor"}'
+            hx-confirm="Throw your version away and go back to the wording the service ships?">Reset to default</button>
+    {% endif %}
+    <span class="text-xs opacity-60">saves straight away — it applies to the next post</span>
+  </div>
+</form>

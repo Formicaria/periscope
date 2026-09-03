@@ -7,6 +7,7 @@ import sys
 
 from periscope import LabBot, Settings
 
+from . import messages  # noqa: F401  — importing messages registers the media.* message kinds
 from .config import ArrSettings
 from .hub import COGS, MediaHub
 

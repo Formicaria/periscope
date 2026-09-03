@@ -71,7 +71,7 @@ async def test_service_form_renders_typed_fields(client):
     assert '<select id="f-PVE_MODE"' in html and 'value="fast"' in html             # choice
     assert "Proxmox VE" in html and "Thresholds" in html and "Discord routing" in html
     assert 'title="required"' in html and "API base URL" in html                     # required marker + help
-    assert "lab default: #lab-alerts" in html                                        # shared key hint
+    assert "server default: #lab-alerts" in html                                     # shared key hint
     r = await client.get("/services/nope")
     assert r.status_code == 404
 
@@ -167,22 +167,24 @@ async def test_presences_rename_and_remove(client, reload):
 
 
 # ----- /discord ------------------------------------------------------------------------------------------
-async def test_lab_page_and_save(client, reload):
+async def test_server_page_and_save(client, reload):
     r = await client.get("/discord")
     assert r.status_code == 200
     assert "csecret" not in r.text and "•••• set" in r.text                               # OAuth secret masked
     assert "http://test/auth/callback" in r.text
     assert "#lab-status" in r.text and "#media" in r.text and "@lab-oncall" in r.text        # layout panel
     assert "git-anthill" in r.text and "op-anthill" in r.text
-    r = await client.post("/discord", data={"name": "THE LAB", "color": "#5a189a", "guild_id": "42", "status_channel_id": "1001",
-                                            "alert_channel_id": "1002", "alert_role_id": "2001", "admin_role_ids": ["2001", "2002"],
-                                            "log_level": "debug", "status_interval_s": "30"}, headers=HX)
+    r = await client.post("/discord/servers/main", data={"name": "THE LAB", "color": "#5a189a", "guild_id": "42",
+                                                         "status_channel_id": "1001", "alert_channel_id": "1002",
+                                                         "alert_role_id": "2001", "admin_role_ids": ["2001", "2002"]}, headers=HX)
     assert r.status_code == 200
-    lab = reload().lab
-    assert lab["name"] == "THE LAB" and lab["color"] == "5A189A" and lab["admin_role_ids"] == ["2001", "2002"]
-    assert lab["log_level"] == "DEBUG" and lab["status_interval_s"] == 30 and lab["alert_role_id"] == "2001"
-    r = await client.post("/discord", data={"color": "zzz", "guild_id": "x"}, headers=HX)
-    assert r.status_code == 422 and reload().lab["color"] == "5A189A"
+    srv = reload().server()
+    assert srv["name"] == "THE LAB" and srv["color"] == "5A189A" and srv["admin_role_ids"] == ["2001", "2002"]
+    assert srv["alert_role_id"] == "2001"
+    r = await client.post("/discord/globals", data={"log_level": "debug", "status_interval_s": "30"}, headers=HX)
+    assert r.status_code == 200 and reload().globals == {"log_level": "DEBUG", "status_interval_s": 30}
+    r = await client.post("/discord/servers/main", data={"color": "zzz", "guild_id": "x"}, headers=HX)
+    assert r.status_code == 422 and reload().server()["color"] == "5A189A"
     r = await client.post("/discord/web", data={"base_url": "https://p.example/", "oauth_client_id": "newid", "oauth_client_secret": "",
                                                 "allowed_role_ids": "2002", "port": "8091"}, headers=HX)
     assert r.status_code == 200
@@ -215,7 +217,7 @@ async def test_routing_page_and_save(client, reload):
     r = await client.get("/routing")
     assert r.status_code == 200
     assert 'value="Anthill"' in r.text and 'value="micro*"' in r.text and "#git-anthill" in r.text
-    assert 'id="alert-pve"' in r.text and "lab default · #lab-alerts" in r.text
+    assert 'id="alert-pve"' in r.text and "server default · #lab-alerts" in r.text
     r = await client.post("/routing", data={"repo": ["Anthill", "periscope", ""], "channel": ["1003", "1001", ""],
                                             "GITHUB_FEED_CHANNEL_ID": "1002", "GITHUB_CI_CHANNEL_ID": "", "GITHUB_MIRROR_TO_FEED": "true"}, headers=HX)
     assert r.status_code == 200 and "2 rule(s)" in r.text
@@ -252,7 +254,8 @@ async def test_api_status_and_config_masked(client, store):
 
 
 async def test_no_secret_leaks_anywhere(client):
-    for path in ("/", "/services/pve", "/services/github", "/presences", "/discord", "/routing", "/setup", "/logs"):
+    for path in ("/", "/services/pve", "/services/github", "/presences", "/discord", "/messages", "/messages/pve.board",
+                 "/routing", "/setup", "/logs"):
         r = await client.get(path)
         assert r.status_code == 200, path
         assert "good-token-abc" not in r.text and "s3cret" not in r.text and "csecret" not in r.text, path

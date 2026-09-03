@@ -60,7 +60,7 @@ def _apply_lab(store: Store, env: dict[str, str]) -> None:
             lab[field] = [x.strip() for x in v.split(",") if x.strip()]
         elif field == "status_interval_s":
             lab[field] = int(v) if v.isdigit() else 60
-        elif not lab.get(field) or lab.get(field) in ("lab", "my-lab", "5865F2"):
+        elif not lab.get(field) or lab.get(field) in ("lab", "my-lab", "my server", "5865F2"):
             lab[field] = v
 
 
@@ -152,7 +152,15 @@ def migrate_v1(store: Store, root: Path) -> list[str]:
         store.presences["plex"] = {"token": displexia["DISCORD_TOKEN"], "label": "plex"}
         env = {k: v for k, v in displexia.items() if k not in ("DISCORD_TOKEN",) and v}
         env.setdefault("PLEXREQ_GUILD_ID", displexia.get("GUILD_ID", ""))
-        store.services["plexrequests"] = {"enabled": True, "presence": "plex", "env": env}
+        # the standalone Plex bot usually lived in its own Discord server — keep it as a second server here
+        server = store.default_server()
+        gid = str(displexia.get("GUILD_ID") or "").strip()
+        if gid and gid != str(store.server().get("guild_id") or "").strip():
+            server = "plex"
+            srv = store.add_server(server, str(displexia.get("SERVER_NAME") or "Plex").strip() or "Plex")
+            srv["guild_id"] = gid
+            log.info("the Plex bot's Discord server (%s) was added as a second server", gid)
+        store.services["plexrequests"] = {"enabled": True, "presence": "plex", "server": server, "env": env}
         created.append("plexrequests")
 
     # one identity per old bot is the whole picture — an empty shared `default` would only show as "missing token"

@@ -98,7 +98,7 @@ async def auth_callback(request: Request, code: str | None = None, state: str | 
         access = str(tok.get("access_token") or "")
         me = await api.oauth_me(access)
         roles: list[str] = []
-        gid = str(store.lab.get("guild_id") or "").strip()
+        gid = str(store.server().get("guild_id") or "").strip()
         if gid:
             try:
                 member = await api.oauth_member(access, gid)
@@ -106,7 +106,7 @@ async def auth_callback(request: Request, code: str | None = None, state: str | 
             except DiscordError as e:
                 if e.status != 404:
                     raise
-                return render(request, "login.html", {"oauth": True, "denied": "you are not a member of the lab server",
+                return render(request, "login.html", {"oauth": True, "denied": "you are not a member of that Discord server",
                                                       "token_available": bool(st.setup_token), "next": nxt}, status=403)
     except DiscordError as e:
         log.warning("OAuth sign-in failed: %s", e)

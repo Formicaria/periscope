@@ -70,7 +70,7 @@
       <form hx-post="/setup/layout" hx-target="#setup-steps" hx-swap="outerHTML" hx-indicator="this" method="post" action="/setup/layout">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <button class="btn btn-primary btn-sm"><span class="htmx-indicator loading loading-spinner loading-xs"></span>Create missing channels and roles</button>
-        <span class="text-xs opacity-60 ml-2">also fills the lab defaults (#lab-status, #lab-alerts, @lab-oncall, @lab-admin)</span>
+        <span class="text-xs opacity-60 ml-2">also fills this server's defaults (#lab-status, #lab-alerts, @lab-oncall, @lab-admin)</span>
       </form>
       {% else %}
       <p class="text-xs opacity-70">Layout complete. Per-project <span class="mono">#git-*</span> feeds: <a href="/discord" class="link">Discord page</a>.</p>

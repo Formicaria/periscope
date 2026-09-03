@@ -1,0 +1,24 @@
+<form id="globals-form" class="card bg-base-200 shadow-sm" method="post" action="/discord/globals" hx-post="/discord/globals"
+      hx-target="#globals-form" hx-swap="outerHTML">
+  <div class="card-body p-4 gap-3">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h3 class="text-xs uppercase tracking-widest opacity-60">Shared settings</h3>
+    <p class="text-xs opacity-70">These are not per-server: they apply to every bot in every server.</p>
+    <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Log level</span><span class="label-text-alt mono opacity-40 text-[10px]">LOG_LEVEL</span></label>
+        <select name="log_level" class="select select-bordered select-sm">
+          {% for lv in levels %}<option {% if lv == globals.log_level %}selected{% endif %}>{{ lv }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Board refresh (seconds)</span><span class="label-text-alt mono opacity-40 text-[10px]">STATUS_INTERVAL_S</span></label>
+        <input type="number" name="status_interval_s" value="{{ globals.status_interval_s }}" min="10" class="input input-bordered input-sm mono">
+      </div>
+    </div>
+    <div class="card-actions items-center gap-3 mt-2">
+      <button class="btn btn-primary btn-sm">Save</button>
+      <span class="text-xs opacity-60">applies on the next restart</span>
+    </div>
+  </div>
+</form>

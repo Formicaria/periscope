@@ -20,6 +20,7 @@ from typing import Any
 
 from .config import Settings, env_scope
 from .logging import setup_logging
+from .messages import MessageStore
 from .presence import Presence, build_intents, explain_presence_error
 from .registry import discover
 from .service import ServiceBot, ServiceSpec
@@ -40,6 +41,7 @@ class Runtime:
         self.data_dir = root / "data"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.state = JsonState(self.data_dir / "state.json")
+        self.messages = MessageStore(store.path.parent / "messages.yaml")   # customised posts, next to periscope.yaml
         self.specs: dict[str, ServiceSpec] = discover()
         self.presences: dict[str, Presence] = {}
         self.services: dict[str, ServiceBot] = {}
@@ -51,9 +53,10 @@ class Runtime:
 
     # ----- assembly --------------------------------------------------------------------------
     def assemble(self) -> None:
-        lab = self.store.lab
-        guild_id = int(lab["guild_id"]) if str(lab.get("guild_id") or "").strip() else None
-        admin_ids = [int(x) for x in (lab.get("admin_role_ids") or []) if str(x).strip()]
+        default_server = self.store.server()
+        raw_guild = str(default_server.get("guild_id") or "").strip()
+        guild_id = int(raw_guild) if raw_guild.isdigit() else None
+        admin_ids = [int(x) for x in (default_server.get("admin_role_ids") or []) if str(x).strip().isdigit()]
         wh = self.store.webhook
         self.webhook = WebhookServer(str(wh.get("host", "0.0.0.0")), int(wh.get("port", 8080)), str(wh.get("secret") or "") or None)
 
@@ -87,14 +90,15 @@ class Runtime:
         for name, spec, pname, token, env in runnable:
             pres = self.presences.get(pname)
             if pres is None:
-                pres = Presence(pname, token, guild_id=guild_id, admin_role_ids=admin_ids, lab_name=str(lab.get("name") or "lab"),
+                pres = Presence(pname, token, guild_id=guild_id, admin_role_ids=admin_ids,
+                                lab_name=str(default_server.get("name") or "my server"),
                                 intents=build_intents(intents.get(pname, ())))
                 self.presences[pname] = pres
                 if intents.get(pname):
                     log.info("[%s] gateway intents beyond default: %s", pname, ", ".join(sorted(intents[pname])))
             with env_scope(env):
                 settings = Settings.from_env()
-            sb = ServiceBot(spec, pres, settings, env, self.state, self.webhook)
+            sb = ServiceBot(spec, pres, settings, env, self.state, self.webhook, self.messages)
             if self.webhook and env.get("WEBHOOK_SECRET"):
                 self.webhook.accept_secret(env["WEBHOOK_SECRET"])
             pres.services.append(sb)

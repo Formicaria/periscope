@@ -82,10 +82,14 @@ def test_migrate_v1_standalone_plex_bot(tmp_path, monkeypatch):
     created = migrate_v1(s, tmp_path)
     assert "plexrequests" in created and "proxmox" in created
     assert s.presences["plex"]["token"] == "tok-plex" and s.services["plexrequests"]["presence"] == "plex"
+    # its own Discord server became a second server, and the service posts there
+    assert s.services["plexrequests"]["server"] == "plex" and s.servers["plex"]["guild_id"] == "77"
+    assert s.servers["plex"]["name"] == "lab.example" and s.server_env("plex")["GUILD_ID"] == "77"
+    assert s.env_for("plexrequests")["LAB_NAME"] == "lab.example"
     env = s.services["plexrequests"]["env"]
     assert env["PLEXREQ_GUILD_ID"] == "77" and env["GUILD_ID"] == "77" and "DISCORD_TOKEN" not in env
     assert env["CHANNEL_ID"] == "100" and env["RADARR_API_KEY"] == "rk" and env["AUTO_REVOKE"] == "1" and "OVERSEERR_URL" not in env
-    assert s.lab["guild_id"] == "42"                                 # the lab keeps its own server
+    assert s.lab["guild_id"] == "42"                                 # the first server is untouched
     flat = s.env_for("plexrequests")
     assert flat["DISCORD_TOKEN"] == "tok-plex" and flat["GUILD_ID"] == "77" and flat["PLEXREQ_GUILD_ID"] == "77"
     # nothing at the legacy location → no plexrequests service

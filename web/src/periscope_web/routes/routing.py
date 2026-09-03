@@ -37,42 +37,56 @@ async def _ctx(request: Request) -> dict:
     st = request.app.state
     runtime = st.runtime
     store = runtime.store
-    channels, roles = await st.guild.channels(), await st.guild.roles()
+    # the repo map belongs to the github service, so its channel picker shows that service's server
+    channels = await st.guild.channels(store.server_for("github"))
     gh = (store.services.get("github") or {}).get("env") or {}
     rows = parse_map(str(gh.get("GITHUB_REPO_CHANNEL_MAP") or ""))
     return {
-        "channels": channels, "roles": roles, "rows": rows,
+        "channels": channels, "rows": rows,
         "feed": str(gh.get("GITHUB_FEED_CHANNEL_ID") or ""), "ci": str(gh.get("GITHUB_CI_CHANNEL_ID") or ""),
         "mirror": str(gh.get("GITHUB_MIRROR_TO_FEED") or "false").lower() in ("1", "true", "yes", "on"),
-        "github_installed": "github" in runtime.specs, "alerts": _alert_rows(request),
-        "lab_defaults": _lab_default_labels(store, channels, roles),
+        "github_installed": "github" in runtime.specs, "alerts": await _alert_rows(request),
+        "many_servers": len(store.servers) > 1,
     }
 
 
-def _lab_default_labels(store, channels, roles) -> dict[str, str]:
-    """Human labels for the lab-level defaults ('#lab-alerts', '@lab-oncall', or the bare id)."""
+def _default_labels(store, key: str, channels, roles) -> dict[str, str]:
+    """Human labels for one server's own defaults ('#lab-alerts', '@lab-oncall', or the bare id)."""
+    srv = store.server(key)
     out = {}
-    for key, lab_key in (("ALERT_CHANNEL_ID", "alert_channel_id"), ("STATUS_CHANNEL_ID", "status_channel_id"), ("ALERT_ROLE_ID", "alert_role_id")):
-        v = str(store.lab.get(lab_key) or "")
+    for env_key, field in (("ALERT_CHANNEL_ID", "alert_channel_id"), ("STATUS_CHANNEL_ID", "status_channel_id"),
+                           ("ALERT_ROLE_ID", "alert_role_id")):
+        v = str(srv.get(field) or "")
         if not v:
-            out[key] = ""
+            out[env_key] = ""
             continue
-        pool = roles if key.endswith("_ROLE_ID") else channels
+        pool = roles if env_key.endswith("_ROLE_ID") else channels
         hit = next((x for x in pool if x.id == v), None)
-        out[key] = hit.label if hit else v
+        out[env_key] = hit.label if hit else v
     return out
 
 
-def _alert_rows(request: Request) -> list[dict]:
-    runtime = request.app.state.runtime
+async def _alert_rows(request: Request) -> list[dict]:
+    """One row per service, with the pickers of the server that service posts in."""
+    st = request.app.state
+    runtime = st.runtime
     store = runtime.store
     names = list(runtime.specs) + [n for n in store.services if n not in runtime.specs]
+    per_server: dict[str, tuple[list, list, dict[str, str]]] = {}
     out = []
     for name in names:
         spec = runtime.specs.get(name)
         env = (store.services.get(name) or {}).get("env") or {}
+        key = store.server_for(name)
+        if key not in per_server:
+            channels, roles = await st.guild.channels(key), await st.guild.roles(key)
+            per_server[key] = (channels, roles, _default_labels(store, key, channels, roles))
+        channels, roles, defaults = per_server[key]
+        srv = store.server(key)
         out.append({"name": name, "title": spec.title if spec else name, "group": spec.group if spec else "other",
                     "enabled": bool((store.services.get(name) or {}).get("enabled")),
+                    "server": key, "server_label": str(srv.get("name") or "").strip() or key,
+                    "channels": channels, "roles": roles, "defaults": defaults,
                     "values": {k: str(env.get(k) or "") for k in ROUTE_KEYS}})
     return out
 
@@ -123,7 +137,9 @@ async def routing_save(request: Request):
 
 @router.get("/routing/row")
 async def routing_row(request: Request):
-    return partial(request, "partials/repo_row.html", {"repo": "", "cid": "", "channels": await request.app.state.guild.channels()})
+    st = request.app.state
+    channels = await st.guild.channels(st.runtime.store.server_for("github"))
+    return partial(request, "partials/repo_row.html", {"repo": "", "cid": "", "channels": channels})
 
 
 @router.post("/routing/alerts/{name}")
@@ -149,5 +165,5 @@ async def alert_route_save(request: Request, name: str):
         flash(request, f"{name}: alert routing saved — restart to apply", "success")
     ctx = await _ctx(request)
     row = next(r for r in ctx["alerts"] if r["name"] == name)
-    return partial(request, "partials/alert_row.html", {"row": row, "channels": ctx["channels"], "roles": ctx["roles"],
-                                                        "lab_defaults": ctx["lab_defaults"]}, status=422 if errors else 200)
+    return partial(request, "partials/alert_row.html", {"row": row, "many_servers": ctx["many_servers"]},
+                   status=422 if errors else 200)

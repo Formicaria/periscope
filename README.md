@@ -9,7 +9,7 @@
  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚══════╝
 ```
 
-**Your homelab, seen from Discord.** One repo, one install, one CLI — enable only the bots you run. Live status boards pinned in a channel, alerts that resolve themselves, and buttons for the things you'd otherwise SSH in for. Built for a shared server where several people each run their own stack: every embed carries the `LAB_NAME` it came from. MIT licensed, one-command install, one-command updates.
+**Your infrastructure, seen from Discord.** One repo, one install, one CLI — switch on only the integrations you run. Live status boards pinned in a channel, alerts that resolve themselves, and buttons for the things you'd otherwise SSH in for. Several Discord servers from one install, one bot able to post in all of them, and every post editable in the web UI without touching code. MIT licensed, one-command install, one-command updates.
 
 ## The bots
 
@@ -36,13 +36,26 @@ bash setup.sh          # python + venv + every service + web UI, one systemd ser
 Then run `periscope web`: it prints the UI address (`http://<box ip>:8090`) and a **one-time sign-in link** — open
 it and the first-run flow takes it from there: paste a bot token → invite link → pick the server → create the
 channel layout → switch services on one by one, each with a **Test** button that checks the credentials against the
-real thing. Optionally add a Discord OAuth application (Discord page) so members holding `@lab-admin` can sign in
+real thing. Optionally add a Discord OAuth application (Discord page) so members holding an admin role can sign in
 with Discord. Prefer a terminal? `periscope init` does the token/server step, then
 `periscope config <service> KEY=VALUE` and `periscope enable <service>`.
 
 Everything lives in one process (`python -m periscope`, unit `periscope.service`) and one file, `config/periscope.yaml`
 (mode 0600). Services post as *bots* — Discord identities (called presences in the config). New installs get one
 shared bot; any service can be pointed at its own application in the UI (**Bots**) so it keeps its own name and avatar.
+
+**Several Discord servers, one install.** The **Discord** page holds as many servers as you like — each with its own
+name (the one embeds carry), colour, status/alert channels and admin roles. Every service picks the server it posts in,
+so the media stack can live in one server while the Plex request buttons sit in another; a bot posts in every server
+its services use, and registers its slash commands there. Everything that is not per-server (log level, board refresh)
+sits in its own card.
+
+**Every post is editable.** The **Messages** page lists each kind of post — status boards, alerts, the GitHub feed,
+media grabs and imports, the Plex invite and request embeds — with a preview drawn the way Discord draws it. *Simple*
+gives you the title, text, colour, footer and extra fields as a form with clickable `{{ variables }}`; *Code* is the raw
+template (embed-shaped JSON, sandboxed Jinja) for anything more involved. Save applies to the next post, no restart; a
+kind can also be switched off, and **Send a test post** puts the current version in its channel. Customisations live in
+`config/messages.yaml` — delete an entry (or hit Reset) to go back to what the bot ships.
 
 The Overview says in plain words what state every service is in — `running`, `starting`, `needs setup`, `error`, `off` —
 and lists what needs attention with a link to the page that fixes it. `periscope list` prints the same.
@@ -51,6 +64,23 @@ Status boards are one message each, for good: a board remembers its message and 
 restart, an upgrade or a lost state file it finds its earlier message in the channel (pins, then recent history)
 and reuses it, deleting any stray copies, and only posts when there is nothing to reuse. Every board carries a
 `· <name> board` footer so it recognises itself.
+
+### Coming from displexia (the standalone Plex bot)
+
+displexia is gone as a separate thing — its features are the `plexrequests` service inside periscope, running in the
+same process as everything else:
+
+| displexia | periscope |
+|---|---|
+| its own repo, venv and `displexia.service` unit | the `plexrequests` service in this repo; one `periscope.service` for everything |
+| `/opt/displexia/.env` | `config/periscope.yaml` (its keys imported on the first `periscope update`) |
+| `state.json` / `stats.json` in `/opt/displexia` | imported once into `data/state.json`, so sticky embeds and request history carry over |
+| its own bot token and Discord server | a *bot* and a *server* in the UI — usually kept exactly as they were |
+| Get Plex Access · Search & Request · status board · new-on-Plex · auto-revoke · usage stats | all of it, plus the Messages page for rewording any of those embeds |
+| edits meant changing Python | settings on `/services/plexrequests`, wording on `/messages` |
+
+`periscope update` on a box that ran displexia does the import, stops and removes the old unit, and leaves
+`/opt/displexia` untouched — delete it once you're happy.
 
 ### Coming from v1 (one unit per bot)
 
@@ -77,7 +107,7 @@ Override anything with env vars: `CTID=210 IP=192.168.1.50/24 GW=192.168.1.1 VLA
 
 ```
 periscope web                  the admin UI address + a one-time sign-in link
-periscope list                 every service: state · bot it posts as · what needs attention
+periscope list                 every service: state · bot and server it posts in · what needs attention
 periscope enable <svc…>        turn a service on (config must be complete)     periscope disable <svc…>
 periscope check <svc>          test a service's credentials right now
 periscope config <svc> [K=V]   show or set a service's settings, secrets masked

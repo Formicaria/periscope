@@ -1,10 +1,11 @@
 """CI train: one live card per Actions run, edited in place job by job, finalized once."""
 
 import pytest
+from periscope.messages import Messages, MessageStore
 from periscope.state import JsonState
 
 from periscope_github.config import GithubSettings
-from periscope_github.train import CiTrains, job_line, render_train
+from periscope_github.train import KIND, CiTrains, job_line, render_train
 
 
 class Msg:
@@ -30,10 +31,11 @@ class Chan:
 
 
 class Bot:
-    def __init__(self, tmp_path, chan):
+    def __init__(self, tmp_path, chan, messages=None):
         self.state = JsonState(tmp_path / "s.json")
         self.lab_name = "Formicaria"
         self.settings = type("S", (), {"alert_channel_id": None})()
+        self.messages = messages or Messages()   # no customisations unless a test hands in a store
         self.chan = chan
 
     async def get_channel_safe(self, cid):
@@ -103,3 +105,30 @@ async def test_train_lifecycle(tmp_path):
     assert done == [("periscope", "failure")] and not t.is_tracked(9)
     await t.tick()
     assert done == [("periscope", "failure")]                        # nothing tracked, nothing repeated
+
+
+@pytest.mark.asyncio
+async def test_train_card_goes_through_the_template_on_every_edit(tmp_path):
+    chan, client = Chan(), Client()
+    store = MessageStore(tmp_path / "messages.yaml")
+    bot = Bot(tmp_path, chan, Messages(store, service="github", lab="Formicaria"))
+    t = CiTrains(bot, client, GithubSettings(ci_channel_id=5))
+    store.set(KIND, {"title": "🚂 {{ workflow }} #{{ run_number }} · {{ jobs_done }}/{{ job_count }} jobs",
+                     "description": "{% for j in jobs %}{{ j.line }}\n{% endfor %}", "color": "auto",
+                     "fields": [{"name": "Status", "value": "{{ status }}", "inline": True}], "timestamp": True})
+    assert await t.start("periscope", client.run) is True
+    e = chan.msgs[1].embeds[0]
+    assert e.title == "🚂 ci #4 · 1/3 jobs" and e.description.startswith("✅ **lint**  12s\n🟡 **test (core)**")
+    assert e.fields[0].value == "in_progress" and e.url is None       # the template did not keep the link
+
+    client.jobs[1] = {**client.jobs[1], "status": "completed", "conclusion": "success",
+                      "started_at": "2026-09-02T00:00:12Z", "completed_at": "2026-09-02T00:01:00Z"}
+    await t.tick()
+    assert chan.msgs[1].embeds[0].title == "🚂 ci #4 · 2/3 jobs"       # edits are rendered through it too
+
+    store.set(KIND, None, enabled=False)                              # switched off mid-run: the card stays as it is
+    client.run = {**client.run, "status": "completed", "conclusion": "success", "updated_at": "2026-09-02T00:02:00Z"}
+    await t.tick()
+    assert chan.msgs[1].embeds[0].title == "🚂 ci #4 · 2/3 jobs" and not t.is_tracked(9)
+    assert await t.start("periscope", {**client.run, "id": 10, "status": "in_progress"}) is False   # and no new cards
+    assert chan.n == 1

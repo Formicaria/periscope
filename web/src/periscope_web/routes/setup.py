@@ -22,7 +22,7 @@ async def _ctx(request: Request) -> dict:
     tokens = {k: p for k, p in store.presences.items() if p.get("token")}
     first = next(iter(tokens), None)
     app_id = st.app_ids.get(first) if first else None
-    guild_id = str(store.lab.get("guild_id") or "").strip()
+    guild_id = str(store.server().get("guild_id") or "").strip()
     guilds: list[dict] = []
     guild_error = ""
     if first and not guild_id:
@@ -89,9 +89,10 @@ async def setup_guild(request: Request):
     if not gid.isdigit():
         flash(request, "pick a server (or paste its id)", "error")
         return toasts(request, 422) if is_htmx(request) else redirect(request, "/setup")
-    store.lab["guild_id"] = gid
-    if gname and str(store.lab.get("name") or "lab") in ("lab", "my-lab", ""):
-        store.lab["name"] = gname
+    srv = store.server()
+    srv["guild_id"] = gid
+    if gname and str(srv.get("name") or "") in ("lab", "my-lab", "my server", ""):
+        srv["name"] = gname
     save(request)
     flash(request, f"server saved{f' — {gname}' if gname else ''}", "success")
     if is_htmx(request):
@@ -111,27 +112,28 @@ async def setup_layout(request: Request):
         return partial(request, "partials/setup_steps.html", await _ctx(request)) if is_htmx(request) else redirect(request, "/setup")
     st.guild.invalidate()
     store = st.runtime.store
-    # point the lab defaults at the convention channels/roles when they are still empty
+    # point this server's defaults at the convention channels/roles when they are still empty
+    srv = store.server()
     channels, roles = await st.guild.channels(), await st.guild.roles()
     by_name = {c.name.lower(): c.id for c in channels}
     role_by = {r.name.lower(): r.id for r in roles}
     changed = False
     for key, chan in (("status_channel_id", "lab-status"), ("alert_channel_id", "lab-alerts")):
-        if not store.lab.get(key) and by_name.get(chan):
-            store.lab[key] = by_name[chan]
+        if not srv.get(key) and by_name.get(chan):
+            srv[key] = by_name[chan]
             changed = True
-    if not store.lab.get("alert_role_id") and role_by.get("lab-oncall"):
-        store.lab["alert_role_id"] = role_by["lab-oncall"]
+    if not srv.get("alert_role_id") and role_by.get("lab-oncall"):
+        srv["alert_role_id"] = role_by["lab-oncall"]
         changed = True
-    if not store.lab.get("admin_role_ids") and role_by.get("lab-admin"):
-        store.lab["admin_role_ids"] = [role_by["lab-admin"]]
+    if not srv.get("admin_role_ids") and role_by.get("lab-admin"):
+        srv["admin_role_ids"] = [role_by["lab-admin"]]
         changed = True
     if changed:
         save(request)
     if rep.errors:
         flash(request, f"layout: {len(rep.errors)} error(s) — {rep.errors[0]}", "warning")
     else:
-        flash(request, "channel layout ready" + (" — lab defaults filled in" if changed else ""), "success")
+        flash(request, "channel layout ready" + (" — the server's defaults filled in" if changed else ""), "success")
     ctx = await _ctx(request)
     ctx["report"] = rep.lines
     if is_htmx(request):

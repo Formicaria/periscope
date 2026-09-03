@@ -14,7 +14,11 @@ from discord.ext import commands, tasks
 
 from ..common import (
     AVAILABLE_COLOUR,
+    AVAILABLE_KIND,
     BLURPLE,
+    MYSTATUS_KIND,
+    REQUEST_CARD_KIND,
+    REQUEST_KIND,
     STATUS_AVAILABLE,
     STATUS_PARTIAL,
     STATUS_PENDING,
@@ -22,15 +26,18 @@ from ..common import (
     TYPE_EMOJI,
     build_media_embed,
     build_options,
-    build_request_embed,
     check_cooldown,
+    media_ctx,
     parse_typed_title,
     requests_role_denial,
     requests_role_ok,
     result_key,
+    sticky_embed,
     title_label,
     validate_query,
+    via_label,
 )
+from ..config import PlexRequestsSettings
 from ..context import WATCH_MAX_AGE, PlexRequests, slash
 
 log = logging.getLogger(__name__)
@@ -38,6 +45,65 @@ log = logging.getLogger(__name__)
 REQUEST_CUSTOM_ID = "plexrequests:request"
 LEGACY_REQUEST_CUSTOM_ID = "ztplex:request"    # buttons on embeds posted by the standalone bot keep working
 REQUEST_MESSAGE_KEY = "request_message_id"
+HISTORY_ICON = {"queued": "⏳", "available": "🟢"}
+ARR_MEDIA_TYPE = {"radarr": "movie", "sonarr": "tv"}   # for watches recorded before the type was kept
+
+
+# ----- the cards and lists as data + drawing (pure, so the Messages page can preview them) ------------------
+
+def request_card(pick: dict[str, Any], requester: str) -> discord.Embed:
+    """The announcement posted when a request was accepted: the media card, footer saying who asked."""
+    return build_media_embed(pick, footer=f"Requested by {requester} • added to the download queue")
+
+
+def request_ctx(pick: dict[str, Any], requester: str, requester_id: int,
+                cfg: PlexRequestsSettings) -> dict[str, Any]:
+    """What a plexrequests.request_card template can use besides the card's own parts."""
+    return {**media_ctx(pick), "requester": requester, "requester_id": requester_id, "plex_name": cfg.plex_name}
+
+
+def available_embed(embed: discord.Embed, requester: str, cfg: PlexRequestsSettings) -> discord.Embed:
+    """The request card once the title is on Plex: a copy of the card flipped green with the footer swapped.
+    A copy, so a card whose kind is switched off is left exactly as it was posted."""
+    out = discord.Embed.from_dict(embed.to_dict())
+    out.colour = discord.Colour.from_str(AVAILABLE_COLOUR)
+    out.set_footer(text=f"Requested by {requester} • {cfg.available_text}")
+    return out
+
+
+def available_ctx(watch: dict[str, Any], cfg: PlexRequestsSettings) -> dict[str, Any]:
+    """What a plexrequests.available template can use besides the card's own parts (from the watch record)."""
+    name, year = str(watch.get("title") or ""), watch.get("year") or ""
+    return {
+        "name": name, "year": year, "label": title_label({"title": name, "year": year}, bold=False),
+        "media_type": watch.get("media_type") or ARR_MEDIA_TYPE.get(str(watch.get("kind")), ""),
+        "requester": str(watch.get("requester") or ""), "requester_id": watch.get("requester_id") or 0,
+        "backend": watch.get("backend") or "", "available_text": cfg.available_text, "plex_link": cfg.plex_link,
+        "plex_name": cfg.plex_name,
+    }
+
+
+def history_entries(hist: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A user's request history as plain rows, newest first."""
+    return [{"name": h["title"], "year": h.get("year") or "", "media_type": h.get("type") or "",
+             "status": h.get("status") or "queued", "when": time.strftime("%b %d", time.localtime(h.get("ts", 0)))}
+            for h in reversed(hist)]
+
+
+def mystatus_embed(hist: list[dict[str, Any]]) -> discord.Embed:
+    """`/requests mystatus`: one line per request, newest first, capped at 15."""
+    lines = []
+    for h in history_entries(hist):
+        year = f" ({h['year']})" if h["year"] else ""
+        lines.append(f"{HISTORY_ICON.get(h['status'], '⏳')} {TYPE_EMOJI.get(h['media_type'], '')} "
+                     f"**{h['name']}{year}** — {h['status']} · {h['when']}")
+    return discord.Embed(title="📈 Your requests", description="\n".join(lines[:15]),
+                         colour=discord.Colour.from_str(BLURPLE))
+
+
+def mystatus_ctx(hist: list[dict[str, Any]], requester: str, cfg: PlexRequestsSettings) -> dict[str, Any]:
+    """What a plexrequests.mystatus template can use besides the list's own parts."""
+    return {"history": history_entries(hist), "count": len(hist), "requester": requester, "plex_name": cfg.plex_name}
 
 
 class RequestModal(discord.ui.Modal, title="Request a movie or show"):
@@ -163,6 +229,15 @@ class RequestsCog(commands.Cog):
     def view(self) -> RequestButtonView:
         return RequestButtonView(self)
 
+    def embed(self) -> discord.Embed | None:
+        """The sticky request embed as customised on the Messages page (None = switched off)."""
+        return sticky_embed(self.bot, REQUEST_KIND, self.cfg)
+
+    async def restick(self, channel: Any) -> None:
+        embed = self.embed()
+        if embed is not None:
+            await self.ctx.sticky.restick(channel, REQUEST_MESSAGE_KEY, embed, self.view())
+
     # ----- search -----
 
     async def start_request_search(self, member: Any, query: str) -> tuple[str | None, list[dict[str, Any]] | None]:
@@ -240,20 +315,27 @@ class RequestsCog(commands.Cog):
         self.ctx.stats.bump("request_ok" if ok else "request_fail", member)
         if ok:
             announce_channel = self.announce_channel_for(pick["media_type"], member, channel)
-            try:
-                ann = await announce_channel.send(embed=build_media_embed(
-                    pick, footer=f"Requested by {member.display_name} • added to the download queue"))
-                self.ctx.records.track_request(member.id, pick, ann.id if ann else 0)
-                if watch_info and ann:
-                    self.ctx.records.add_watch(watch_info, getattr(announce_channel, "id", 0), ann.id,
-                                               member.display_name, member.id, pick["title"])
-                    log.info("watching %s for availability (msg %s)", watch_info, ann.id)
-            except discord.Forbidden:
-                pass
-            if getattr(announce_channel, "id", None) == self.cfg.requests_channel_id:
-                await self.ctx.sticky.restick(announce_channel, REQUEST_MESSAGE_KEY, build_request_embed(self.cfg), self.view())
-            via = "Seerr" if pick.get("backend") == "seerr" else ("Radarr" if pick["media_type"] == "movie" else "Sonarr")
-            return (f"{emoji} {label} requested! {via} has it now — it'll appear on Plex once it's downloaded.", card)
+            post = self.bot.messages.apply(REQUEST_CARD_KIND, request_card(pick, member.display_name),
+                                           request_ctx(pick, member.display_name, member.id, self.cfg))
+            if post is None:
+                # the card is switched off (Messages page): the request still counts, but there is no card to
+                # flip green later, so nothing is watched either
+                self.ctx.records.track_request(member.id, pick, 0)
+            else:
+                try:
+                    ann = await announce_channel.send(embed=post)
+                    self.ctx.records.track_request(member.id, pick, ann.id if ann else 0)
+                    if watch_info and ann:
+                        self.ctx.records.add_watch(watch_info, getattr(announce_channel, "id", 0), ann.id,
+                                                   member.display_name, member.id, pick["title"],
+                                                   media_type=pick["media_type"], year=pick.get("year") or "")
+                        log.info("watching %s for availability (msg %s)", watch_info, ann.id)
+                except discord.Forbidden:
+                    pass
+            if post is not None and getattr(announce_channel, "id", None) == self.cfg.requests_channel_id:
+                await self.restick(announce_channel)   # the card landed below the buttons — put them back at the bottom
+            return (f"{emoji} {label} requested! {via_label(pick)} has it now — it'll appear on Plex once it's "
+                    f"downloaded.", card)
         low = (msg or "").lower()
         if "already exists" in low or "already" in low:
             return (f"⏳ {label} was already requested — it's in the queue.", card)
@@ -275,16 +357,12 @@ class RequestsCog(commands.Cog):
                 "You haven't requested anything yet — hit **Search & Request** or use `/requests request`!",
                 ephemeral=True)
             return
-        icon = {"queued": "⏳", "available": "🟢"}
-        lines = []
-        for h in reversed(hist):
-            year = f" ({h['year']})" if h.get("year") else ""
-            when = time.strftime("%b %d", time.localtime(h.get("ts", 0)))
-            lines.append(f"{icon.get(h.get('status'), '⏳')} {TYPE_EMOJI.get(h.get('type'), '')} "
-                         f"**{h['title']}{year}** — {h.get('status', 'queued')} · {when}")
-        e = discord.Embed(title="📈 Your requests", description="\n".join(lines[:15]),
-                          colour=discord.Colour.from_str(BLURPLE))
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        e = mystatus_embed(hist)
+        post = self.bot.messages.apply(MYSTATUS_KIND, e, mystatus_ctx(hist, interaction.user.display_name, self.cfg))
+        if post is None:                      # the embed is switched off: the same list as plain text
+            await interaction.response.send_message(f"📈 **Your requests**\n{e.description}", ephemeral=True)
+            return
+        await interaction.response.send_message(embed=post, ephemeral=True)
 
     # ----- typed titles -----
 
@@ -313,7 +391,7 @@ class RequestsCog(commands.Cog):
                     f"(this menu vanishes once the request is sent):", view=view)
             except discord.HTTPException:
                 log.error("cannot post the results menu in #%s", getattr(message.channel, "name", message.channel))
-        await self.ctx.sticky.restick(message.channel, REQUEST_MESSAGE_KEY, build_request_embed(self.cfg), self.view())
+        await self.restick(message.channel)
 
     # ----- availability watcher -----
 
@@ -327,15 +405,15 @@ class RequestsCog(commands.Cog):
         except discord.HTTPException:
             return True                       # message deleted — stop watching
         if msg.embeds:
-            e = msg.embeds[0]
-            e.colour = discord.Colour.from_str(AVAILABLE_COLOUR)
-            e.set_footer(text=f"Requested by {watch['requester']} • {self.cfg.available_text}")
-            try:
-                await msg.edit(embed=e)
-                log.info("marked available: msg %s (%s)", msg.id, e.title)
-                self.ctx.stats.bump("became_available")
-            except discord.HTTPException:
-                pass
+            e = available_embed(msg.embeds[0], watch["requester"], self.cfg)
+            post = self.bot.messages.apply(AVAILABLE_KIND, e, available_ctx(watch, self.cfg))
+            if post is not None:          # switched off: the card stays as it was, the ping below still goes out
+                try:
+                    await msg.edit(embed=post)
+                    log.info("marked available: msg %s (%s)", msg.id, e.title)
+                    self.ctx.stats.bump("became_available")
+                except discord.HTTPException:
+                    pass
         if watch.get("requester_id"):
             try:
                 await channel.send(f"🎉 <@{watch['requester_id']}> — **{watch.get('title', 'your request')}** "
@@ -401,7 +479,12 @@ class RequestsCog(commands.Cog):
         if channel is None:
             log.error("[%s] could not find the requests channel (%s)", self.bot.name, self.cfg.requests_channel_id)
             return
-        await self.ctx.sticky.ensure(channel, REQUEST_MESSAGE_KEY, build_request_embed(self.cfg), self.view())
+        embed = self.embed()
+        if embed is None:
+            log.info("[%s] the request embed is switched off (Messages page) — not posting it in #%s", self.bot.name,
+                     getattr(channel, "name", channel))
+            return
+        await self.ctx.sticky.ensure(channel, REQUEST_MESSAGE_KEY, embed, self.view())
 
 
 async def setup(bot: Any) -> None:

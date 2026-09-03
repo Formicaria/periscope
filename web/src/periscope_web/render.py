@@ -17,6 +17,7 @@ from periscope.embeds import human_duration
 
 from . import __version__
 from .auth import FLASH_COOKIE
+from .markdown import discord_markdown
 
 TEMPLATES = Path(__file__).parent / "templates"
 
@@ -24,6 +25,7 @@ NAV = [
     ("/", "Overview", "grid"),
     ("/presences", "Bots", "bot"),
     ("/discord", "Discord", "hash"),
+    ("/messages", "Messages", "message"),
     ("/routing", "Routing", "route"),
     ("/logs", "Logs", "terminal"),
 ]
@@ -54,6 +56,7 @@ def _env() -> Environment:
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
                       trim_blocks=True, lstrip_blocks=True)
     env.filters["duration"] = human_duration
+    env.filters["md"] = discord_markdown       # Discord's markdown in an embed preview, escaped first
     env.globals["version"] = __version__
     env.globals["nav"] = NAV
     env.globals["state_badge"] = lambda s: STATE_BADGE.get(s, "badge-ghost")
@@ -90,7 +93,7 @@ def _base_ctx(request: Request) -> dict[str, Any]:
         "user": user,
         "csrf": user.csrf if user else "",
         "path": request.url.path,
-        "lab": store.lab,
+        "default_server": store.server(),      # the one the footer names and the sign-in gate checks
         "noauth": st.noauth,
         "dirty": st.dirty(),
         "setup_needed": setup_needed,

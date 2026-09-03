@@ -40,10 +40,11 @@ class Records:
         return list(self._s.get("watches") or [])
 
     def add_watch(self, info: dict[str, Any], channel_id: int, message_id: int, requester: str,
-                  requester_id: int = 0, title: str = "") -> None:
+                  requester_id: int = 0, title: str = "", media_type: str = "", year: str = "") -> None:
         watches = self.watches()
         watches.append({**info, "channel_id": channel_id, "message_id": message_id, "requester": requester,
-                        "requester_id": requester_id, "title": title, "added": time.time()})
+                        "requester_id": requester_id, "title": title, "media_type": media_type, "year": year,
+                        "added": time.time()})
         self._s.set("watches", watches)
 
     def drop_watches(self, message_ids: set[int]) -> None:

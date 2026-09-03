@@ -15,6 +15,7 @@ from periscope import ServiceBot, ServiceSpec, env_scope, settings_from_example
 from periscope.http import HttpClient, HttpError
 from periscope.migrate import PLEXREQUESTS_LEGACY_DIR
 
+from . import messages  # noqa: F401  — importing messages registers the plexrequests.* message kinds
 from .arr import ArrClient
 from .backend import RequestBackend, select_backend
 from .config import BACKENDS, PlexRequestsSettings

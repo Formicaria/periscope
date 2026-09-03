@@ -87,9 +87,10 @@ def test_log_buffer_ring_and_keepalive():
 # ----- setup flow ------------------------------------------------------------------------------------------
 @pytest.fixture
 def fresh(store):
-    """A store as it looks on a brand-new install: no token, no server."""
+    """A store as it looks on a brand-new install: no token, one server without an id."""
     store.presences["default"]["token"] = ""
     store.presences.pop("arr")
+    store.remove_server("plex")
     store.lab["guild_id"] = ""
     store.services.clear()
     store.save()
@@ -122,14 +123,14 @@ async def test_setup_step1_token_and_step2_guild(client, fresh, reload, app, api
     assert "/services/pve" in r.text                                                     # step 4 links
 
 
-async def test_setup_step3_layout_fills_lab_defaults(client, store, reload, guild):
+async def test_setup_step3_layout_fills_server_defaults(client, store, reload, guild):
     store.lab.update({"status_channel_id": "", "alert_channel_id": "", "alert_role_id": "", "admin_role_ids": []})
     r = await client.post("/setup/layout", headers=HX)
     assert r.status_code == 200 and "created #media" in r.text
-    lab = reload().lab
-    assert lab["status_channel_id"] == "1001" and lab["alert_channel_id"] == "1002" and lab["admin_role_ids"] == ["2001"]
+    srv = reload().server()                                            # the default server, not the plex one
+    assert srv["status_channel_id"] == "1001" and srv["alert_channel_id"] == "1002" and srv["admin_role_ids"] == ["2001"]
     oncall = next(r.id for r in guild.roles if r.name == "lab-oncall")
-    assert lab["alert_role_id"] == str(oncall)
+    assert srv["alert_role_id"] == str(oncall) and not reload().servers["plex"]["alert_role_id"]
 
 
 # ----- restart --------------------------------------------------------------------------------------------

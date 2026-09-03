@@ -1,0 +1,53 @@
+{# One embed drawn the way Discord draws it. Takes `embed` (a plain dict, or None when nothing would be posted). #}
+{% if embed %}
+{% set colour = embed.get('color') %}
+<div class="flex text-sm rounded bg-base-300/40 overflow-hidden max-w-lg">
+  <div class="w-1 shrink-0" style="background: {% if colour is not none %}#{{ '%06X' % colour }}{% else %}oklch(var(--bc)/.25){% endif %}"></div>
+  <div class="min-w-0 flex-1 px-3 py-2.5">
+    <div class="flex gap-3">
+      <div class="min-w-0 flex-1 space-y-1.5">
+        {% if embed.author and embed.author.name %}
+        <div class="flex items-center gap-1.5 text-xs font-medium">
+          {% if embed.author.icon_url %}<img src="{{ embed.author.icon_url }}" alt="" class="h-5 w-5 rounded-full object-cover">{% endif %}
+          {% if embed.author.url %}<a href="{{ embed.author.url }}" target="_blank" rel="noopener noreferrer" class="link link-hover">{{ embed.author.name }}</a>
+          {% else %}<span>{{ embed.author.name }}</span>{% endif %}
+        </div>
+        {% endif %}
+        {% if embed.title %}
+        <div class="font-semibold leading-snug break-words">
+          {% if embed.url %}<a href="{{ embed.url }}" target="_blank" rel="noopener noreferrer" class="link link-primary link-hover">{{ embed.title | md }}</a>
+          {% else %}{{ embed.title | md }}{% endif %}
+        </div>
+        {% endif %}
+        {% if embed.description %}<div class="text-sm leading-relaxed opacity-90 break-words">{{ embed.description | md }}</div>{% endif %}
+      </div>
+      {% if embed.thumbnail and embed.thumbnail.url %}
+      <img src="{{ embed.thumbnail.url }}" alt="" class="h-20 w-20 shrink-0 rounded object-cover bg-base-300">
+      {% endif %}
+    </div>
+    {% if embed.fields %}
+    <div class="grid grid-cols-3 gap-x-3 gap-y-2 mt-2">
+      {% for f in embed.fields %}
+      <div class="{{ 'col-span-1' if f.get('inline') else 'col-span-3' }} min-w-0">
+        <div class="text-xs font-semibold break-words">{{ f.name | md }}</div>
+        <div class="text-xs opacity-90 break-words">{{ f.value | md }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if embed.image and embed.image.url %}
+    <img src="{{ embed.image.url }}" alt="" class="mt-2 rounded max-h-56 w-full object-cover bg-base-300">
+    {% endif %}
+    {% if (embed.footer and embed.footer.text) or embed.timestamp %}
+    <div class="flex items-center gap-1.5 mt-2 text-[11px] opacity-60">
+      {% if embed.footer and embed.footer.icon_url %}<img src="{{ embed.footer.icon_url }}" alt="" class="h-4 w-4 rounded-full object-cover">{% endif %}
+      {% if embed.footer and embed.footer.text %}<span class="break-words">{{ embed.footer.text }}</span>{% endif %}
+      {% if embed.footer and embed.footer.text and embed.timestamp %}<span>•</span>{% endif %}
+      {% if embed.timestamp %}<span class="mono">{{ embed.timestamp[:16] | replace('T', ' ') }} UTC</span>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="text-xs opacity-60 italic rounded bg-base-300/30 px-3 py-2.5 max-w-lg">Nothing would be posted.</div>
+{% endif %}

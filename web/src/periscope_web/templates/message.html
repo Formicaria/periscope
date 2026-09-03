@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}{{ kind.title }}{% endblock %}
+{% block heading %}<a href="/messages" class="opacity-50 hover:opacity-100">Messages</a> <span class="opacity-30">/</span> {{ kind.title }}{% endblock %}
+{% block content %}
+<div id="message-editor" data-key="{{ key }}">
+  <div class="flex flex-wrap items-start gap-3 mb-4">
+    <div class="min-w-0">
+      <p class="text-sm opacity-80">{{ kind.description }}</p>
+      <p class="text-xs opacity-60 mt-1">
+        {% if kind.where %}Goes to {{ kind.where }}{% if where_env %} <span class="mono opacity-60">({{ where_env }})</span>{% endif %}. {% endif %}
+        Part of {{ service_title }} · <span class="mono">{{ key }}</span>
+      </p>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      {% if not enabled %}<span class="badge badge-ghost badge-sm" title="the bot posts nothing for this">switched off</span>{% endif %}
+      {% if customised %}<span class="badge badge-primary badge-sm">reworded</span>{% endif %}
+    </div>
+  </div>
+
+  <section id="preview" class="grid gap-4 md:grid-cols-2 mb-6"
+           hx-post="/messages/{{ key }}/preview" hx-include="#message-form" hx-target="#preview" hx-swap="innerHTML"
+           hx-trigger="input delay:400ms from:#message-form, change delay:400ms from:#message-form">
+    {% include "partials/message_preview.html" %}
+  </section>
+
+  {% include "partials/message_form.html" %}
+</div>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+  (function () {
+    var root = document.getElementById('message-editor');
+    if (!root) return;
+    var dirty = {simple: false, code: false}, lastBox = null, nextRow = 1000;
+    var PASS = ['url', 'thumbnail', 'image', 'timestamp', 'author', 'if'];
+    var REPEAT = {repeat: 'fields', name: '{{ item.name }}', value: '{{ item.value }}', inline: '{{ item.inline }}'};
+
+    function el(id) { return document.getElementById(id); }
+    function on(v) { return v === true || String(v).toLowerCase() === 'true'; }
+    function bump(box) { box.dispatchEvent(new Event('input', {bubbles: true})); }
+
+    // ----- the simple controls <-> a template, exactly as the server maps them -----
+    function colour() {
+      var mode = el('m-color-mode').value;
+      if (mode !== 'custom') return mode;
+      var hex = (el('m-color-hex').value || '').trim().replace(/^#/, '');
+      return /^[0-9a-fA-F]{6}$/.test(hex) ? '#' + hex.toUpperCase() : 'auto';
+    }
+
+    function readSimple() {
+      var pass = {};
+      try { pass = JSON.parse(el('m-pass').value || '{}') || {}; } catch (e) { pass = {}; }
+      var t = {title: el('m-title').value, description: el('m-description').value};
+      if ('url' in pass) t.url = pass.url;
+      t.color = colour();
+      t.fields = [];
+      if (el('m-keep').checked) t.fields.push(REPEAT);
+      Array.prototype.forEach.call(root.querySelectorAll('#m-fields .field-row'), function (row) {
+        var name = row.querySelector('[name="field_name"]').value;
+        var value = row.querySelector('[name="field_value"]').value;
+        if (!name.trim() && !value.trim()) return;
+        t.fields.push({name: name, value: value, inline: row.querySelector('input[type="checkbox"]').checked});
+      });
+      t.footer = el('m-footer').value;
+      PASS.forEach(function (k) { if (k !== 'url' && k in pass) t[k] = pass[k]; });
+      return t;
+    }
+
+    function addRow(name, value, inline) {
+      var html = el('m-field-row').innerHTML.replace(/__i__/g, String(nextRow++));
+      el('m-fields').insertAdjacentHTML('beforeend', html);
+      var row = el('m-fields').lastElementChild;
+      row.querySelector('[name="field_name"]').value = name || '';
+      row.querySelector('[name="field_value"]').value = value || '';
+      row.querySelector('input[type="checkbox"]').checked = !!inline;
+      return row;
+    }
+
+    function writeSimple(t) {
+      el('m-title').value = t.title == null ? '' : String(t.title);
+      el('m-description').value = t.description == null ? '' : String(t.description);
+      el('m-footer').value = typeof t.footer === 'string' ? t.footer : '';
+      var c = String(t.color == null ? 'auto' : t.color).trim(), sel = el('m-color-mode');
+      var known = Array.prototype.map.call(sel.options, function (o) { return o.value; });
+      if (/^#?[0-9a-fA-F]{6}$/.test(c)) {
+        sel.value = 'custom';
+        el('m-color-hex').value = '#' + c.replace(/^#/, '').toUpperCase();
+      } else {
+        sel.value = known.indexOf(c.toLowerCase()) !== -1 ? c.toLowerCase() : 'auto';
+      }
+      var list = Array.isArray(t.fields) ? t.fields : [];
+      el('m-keep').checked = list.some(function (f) { return f && f.repeat; });
+      el('m-fields').innerHTML = '';
+      list.filter(function (f) { return f && !f.repeat; }).forEach(function (f) { addRow(f.name, f.value, on(f.inline)); });
+      var pass = {};
+      PASS.forEach(function (k) { if (k in t) pass[k] = t[k]; });
+      el('m-pass').value = JSON.stringify(pass);
+      syncColour();
+    }
+
+    function syncColour() {
+      var hex = (el('m-color-hex').value || '').trim().replace(/^#/, '');
+      if (/^[0-9a-fA-F]{6}$/.test(hex)) el('m-color-pick').value = '#' + hex;
+      el('m-color-wrap').classList.toggle('hidden', el('m-color-mode').value !== 'custom');
+    }
+
+    // ----- tabs: one template, two ways of editing it -----
+    function showTab(tab) {
+      if (tab === 'code' && dirty.simple) { el('m-code').value = JSON.stringify(readSimple(), null, 2); dirty.simple = false; }
+      if (tab === 'simple' && dirty.code) {
+        try {
+          var t = JSON.parse(el('m-code').value);
+          if (t && typeof t === 'object' && !Array.isArray(t)) { writeSimple(t); dirty.code = false; }
+        } catch (e) { /* leave the boxes alone; the Code tab still holds what was typed */ }
+      }
+      el('m-mode').value = tab;
+      Array.prototype.forEach.call(root.querySelectorAll('[data-tab]'), function (a) {
+        a.classList.toggle('tab-active', a.dataset.tab === tab);
+      });
+      Array.prototype.forEach.call(root.querySelectorAll('[data-pane]'), function (p) {
+        p.classList.toggle('hidden', p.dataset.pane !== tab);
+      });
+    }
+
+    function insert(token) {
+      var box = lastBox && root.contains(lastBox) ? lastBox : el('m-description');
+      if (!box) return;
+      var start = box.selectionStart == null ? box.value.length : box.selectionStart;
+      var end = box.selectionEnd == null ? start : box.selectionEnd;
+      box.value = box.value.slice(0, start) + token + box.value.slice(end);
+      box.focus();
+      if (box.setSelectionRange) box.setSelectionRange(start + token.length, start + token.length);
+      bump(box);
+    }
+
+    document.body.addEventListener('focusin', function (e) {
+      if (e.target.matches && e.target.matches('#message-form input[type="text"], #message-form textarea')) lastBox = e.target;
+    });
+    document.body.addEventListener('input', function (e) {
+      var pane = e.target.closest ? e.target.closest('[data-pane]') : null;
+      if (pane) dirty[pane.dataset.pane] = true;
+      if (e.target.id === 'm-color-hex' || e.target.id === 'm-color-mode') syncColour();
+      if (e.target.id === 'm-color-pick') { el('m-color-hex').value = e.target.value.toUpperCase(); bump(el('m-color-hex')); }
+    });
+    document.body.addEventListener('click', function (e) {
+      var tab = e.target.closest('[data-tab]');
+      if (tab) { e.preventDefault(); showTab(tab.dataset.tab); return; }
+      if (e.target.closest('[data-add-field]')) { bump(addRow('', '', false).querySelector('[name="field_name"]')); return; }
+      var kill = e.target.closest('[data-remove-row]');
+      if (kill) { var row = kill.closest('.field-row'); var box = el('m-fields'); row.remove(); bump(box); return; }
+      var chip = e.target.closest('[data-var]');
+      if (chip) { e.preventDefault(); insert(chip.dataset.var); }
+    });
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+      // the preview swaps every few keystrokes; only a swap of the form itself means the boxes are server-fresh
+      var target = e.detail && e.detail.target;
+      if (!target || target.id !== 'preview') dirty = {simple: false, code: false};
+      if (el('m-color-wrap')) syncColour();
+    });
+    syncColour();
+  })();
+</script>
+{% endraw %}
+{% endblock %}

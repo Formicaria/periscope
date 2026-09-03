@@ -13,6 +13,7 @@ from urllib.parse import quote
 from periscope import ServiceBot, ServiceSpec, Setting, env_scope, settings_from_example
 from periscope.http import HttpClient, HttpError
 
+from . import messages  # noqa: F401  — importing messages registers the media.* message kinds
 from .config import ARR_API_VERSION, ARR_APPS, SERVICE_KEYS, ArrSettings, _norm_url
 from .hub import TITLES, MediaHub
 

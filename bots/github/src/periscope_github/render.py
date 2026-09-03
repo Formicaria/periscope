@@ -1,4 +1,5 @@
-"""Pure functions: GitHub webhook payload -> discord.Embed (or None to skip). No network, no bot."""
+"""Pure functions: GitHub webhook payload -> discord.Embed (or None to skip), plus the plain variables each card
+exposes to its template on the Messages page, and the org overview board. No network, no bot."""
 
 from __future__ import annotations
 
@@ -359,35 +360,46 @@ RENDERERS: dict[str, Renderer] = {
 _VERBOSE_AWARE = {"pull_request", "pull_request_review", "issues", "issue_comment", "release", "workflow_run", "check_run"}
 
 
-def render_generic(event: str, p: dict[str, Any], lab: str) -> discord.Embed | None:
-    """Verbose fallback: a one-line card for any event we have no dedicated renderer for."""
-    action = p.get("action")
-    subject = None
+def _generic_subject(p: dict[str, Any]) -> tuple[str | None, str | None]:
+    """What a payload without a card of its own is about (title/name/tag/ref) and where that links."""
     for key in ("pull_request", "issue", "release", "comment", "review", "check_run", "check_suite", "workflow_job",
                 "deployment", "discussion", "package", "project", "milestone", "label", "alert", "ref"):
         obj = p.get(key)
         if isinstance(obj, dict):
-            subject = obj.get("title") or obj.get("name") or obj.get("tag_name") or obj.get("ref")
-            url = obj.get("html_url")
-            break
+            return obj.get("title") or obj.get("name") or obj.get("tag_name") or obj.get("ref"), obj.get("html_url")
         if isinstance(obj, str):
-            subject, url = obj, None
-            break
-    else:
-        url = None
+            return obj, None
+    return None, None
+
+
+def render_generic(event: str, p: dict[str, Any], lab: str) -> discord.Embed | None:
+    """Verbose fallback: a one-line card for any event we have no dedicated renderer for."""
+    action = p.get("action")
+    subject, url = _generic_subject(p)
     what = event.replace("_", " ") + (f" {str(action).replace('_', ' ')}" if action else "")
     title = f"[{repo_name(p)}] 📌 {what}" + (f": {truncate(str(subject), 80)}" if subject else "")
     return base_embed(p, title, None, lab, color=GREY, url=url or repo_url(p))
 
 
-def render(event: str, payload: dict[str, Any], lab_name: str, verbose: bool = False) -> discord.Embed | None:
+# other names GitHub uses for an event that has a card here (the card, and its message kind, are the same)
+_ALIASES = {"watch": "star", "membership": "member"}
+
+
+def render_event(event: str, payload: dict[str, Any], lab_name: str,
+                 verbose: bool = False) -> tuple[str, discord.Embed | None]:
+    """(kind, embed): the card for an event and which kind of card it is — the event's own name (aliases folded,
+    so watch → star) or "other" for the generic one-liner verbose mode posts when nothing dedicated applies."""
     fn = RENDERERS.get(event)
     if fn is None:
-        return render_generic(event, payload, lab_name) if verbose and repo_name(payload) != "?" else None
+        return "other", (render_generic(event, payload, lab_name) if verbose and repo_name(payload) != "?" else None)
     embed = fn(payload, lab_name, verbose) if event in _VERBOSE_AWARE else fn(payload, lab_name)
     if embed is None and verbose and event not in ("push", "delete"):
-        embed = render_generic(event, payload, lab_name)
-    return embed
+        return "other", render_generic(event, payload, lab_name)
+    return _ALIASES.get(event, event), embed
+
+
+def render(event: str, payload: dict[str, Any], lab_name: str, verbose: bool = False) -> discord.Embed | None:
+    return render_event(event, payload, lab_name, verbose)[1]
 
 
 def one_liner(event: str, embed: discord.Embed, when: dt.datetime | None = None) -> str:
@@ -395,6 +407,222 @@ def one_liner(event: str, embed: discord.Embed, when: dt.datetime | None = None)
     title = embed.title or event
     return f"<t:{int(when.timestamp())}:R> [{truncate(title, 70)}]({embed.url})" if embed.url else \
         f"<t:{int(when.timestamp())}:R> {truncate(title, 70)}"
+
+
+# ----- template variables (Messages page) ------------------------------------
+# The plain values a card's template can use besides the embed's own parts. Names never shadow those parts
+# (title, description, url, author, …), so `pr_title` rather than `title`; only str/int/bool/list/dict values.
+
+def _first_line(text: str | None) -> str:
+    return text.splitlines()[0] if text else ""
+
+
+def _logins(items: list[dict[str, Any]] | None) -> list[str]:
+    return [x.get("login") or "?" for x in items or []]
+
+
+def _names(items: list[dict[str, Any]] | None) -> list[str]:
+    return [x.get("name") or "?" for x in items or []]
+
+
+def _common_ctx(event: str, p: dict[str, Any]) -> dict[str, Any]:
+    s = p.get("sender") or {}
+    return {"event": event, "action": p.get("action") or "", "repo": repo_name(p), "repo_full": repo_full(p),
+            "repo_url": repo_url(p) or "", "org": (p.get("organization") or {}).get("login") or "",
+            "sender": sender_login(p), "sender_url": s.get("html_url") or "", "sender_avatar": s.get("avatar_url") or ""}
+
+
+def _ctx_push(p: dict[str, Any]) -> dict[str, Any]:
+    commits = p.get("commits") or []
+    return {"branch": short_ref(p.get("ref")), "pusher": (p.get("pusher") or {}).get("name") or sender_login(p),
+            "commit_count": len(commits), "forced": bool(p.get("forced")), "compare_url": p.get("compare") or "",
+            "head_sha": (p.get("after") or "")[:7],
+            "commits": [{"sha": (c.get("id") or c.get("sha") or "")[:7], "message": _first_line(c.get("message")),
+                         "author": (c.get("author") or {}).get("name") or (c.get("author") or {}).get("login") or "?",
+                         "url": c.get("url") or ""} for c in commits]}
+
+
+def _ctx_ref(p: dict[str, Any]) -> dict[str, Any]:
+    ref_type, ref = p.get("ref_type") or "ref", p.get("ref") or "?"
+    return {"ref_type": ref_type, "ref": ref, "ref_url": f"{repo_url(p)}/tree/{ref}" if repo_url(p) else ""}
+
+
+def _ctx_pull_request(p: dict[str, Any]) -> dict[str, Any]:
+    pr = p.get("pull_request") or {}
+    head = pr.get("head") or {}
+    reviewer = (p.get("requested_reviewer") or {}).get("login") or (p.get("requested_team") or {}).get("name") or ""
+    return {"number": pr.get("number") or p.get("number") or 0, "pr_title": pr.get("title") or "",
+            "pr_author": (pr.get("user") or {}).get("login") or "", "pr_url": pr.get("html_url") or "",
+            "base": (pr.get("base") or {}).get("ref") or "?", "head": head.get("label") or head.get("ref") or "?",
+            "head_sha": (head.get("sha") or "")[:7], "draft": bool(pr.get("draft")), "merged": bool(pr.get("merged")),
+            "additions": pr.get("additions") or 0, "deletions": pr.get("deletions") or 0,
+            "changed_files": pr.get("changed_files") or 0, "labels": _names(pr.get("labels")), "reviewer": reviewer,
+            "body": truncate(pr.get("body") or "", 1000)}
+
+
+def _ctx_pull_request_review(p: dict[str, Any]) -> dict[str, Any]:
+    review, pr = p.get("review") or {}, p.get("pull_request") or {}
+    return {"number": pr.get("number") or 0, "pr_title": pr.get("title") or "", "pr_url": pr.get("html_url") or "",
+            "state": (review.get("state") or "commented").lower(), "reviewer": (review.get("user") or {}).get("login") or "",
+            "review_url": review.get("html_url") or "", "body": truncate(review.get("body") or "", 1000)}
+
+
+def _ctx_issues(p: dict[str, Any]) -> dict[str, Any]:
+    issue = p.get("issue") or {}
+    return {"number": issue.get("number") or 0, "issue_title": issue.get("title") or "",
+            "issue_author": (issue.get("user") or {}).get("login") or "", "issue_url": issue.get("html_url") or "",
+            "state": issue.get("state") or "", "labels": _names(issue.get("labels")),
+            "assignees": _logins(issue.get("assignees")), "label": (p.get("label") or {}).get("name") or "",
+            "assignee": (p.get("assignee") or {}).get("login") or "", "body": truncate(issue.get("body") or "", 1000)}
+
+
+def _ctx_issue_comment(p: dict[str, Any]) -> dict[str, Any]:
+    issue, comment = p.get("issue") or {}, p.get("comment") or {}
+    return {"number": issue.get("number") or 0, "issue_title": issue.get("title") or "",
+            "issue_url": issue.get("html_url") or "", "is_pr": bool(issue.get("pull_request")),
+            "commenter": (comment.get("user") or {}).get("login") or sender_login(p),
+            "comment_url": comment.get("html_url") or "", "body": truncate(comment.get("body") or "", 1000)}
+
+
+def _ctx_release(p: dict[str, Any]) -> dict[str, Any]:
+    r = p.get("release") or {}
+    assets = r.get("assets") or []
+    return {"release_name": r.get("name") or r.get("tag_name") or "release", "tag": r.get("tag_name") or "",
+            "release_url": r.get("html_url") or "", "prerelease": bool(r.get("prerelease")), "draft": bool(r.get("draft")),
+            "release_author": (r.get("author") or {}).get("login") or "", "body": truncate(r.get("body") or "", 1000),
+            "asset_count": len(assets),
+            "assets": [{"name": a.get("name") or "", "size": a.get("size") or 0, "url": a.get("browser_download_url") or ""}
+                       for a in assets if isinstance(a, dict)]}
+
+
+def _ctx_workflow_run(p: dict[str, Any]) -> dict[str, Any]:
+    run = p.get("workflow_run") or {}
+    branch = run.get("head_branch") or "?"
+    started, ended = parse_ts(run.get("run_started_at")), parse_ts(run.get("updated_at"))
+    seconds = int((ended - started).total_seconds()) if started and ended else 0
+    return {"workflow": run.get("name") or "workflow", "branch": branch,
+            "on_default_branch": branch == default_branch(p), "run_number": run.get("run_number") or 0,
+            "status": run.get("status") or "", "conclusion": run.get("conclusion") or "",
+            "run_url": run.get("html_url") or "", "sha": (run.get("head_sha") or "")[:7],
+            "commit_title": run.get("display_title") or "", "trigger": run.get("event") or "",
+            "actor": (run.get("actor") or {}).get("login") or sender_login(p),
+            "duration": human_duration(seconds) if started and ended else "—", "duration_s": seconds}
+
+
+def _ctx_star(p: dict[str, Any]) -> dict[str, Any]:
+    return {"stars": (p.get("repository") or {}).get("stargazers_count") or 0}
+
+
+def _ctx_fork(p: dict[str, Any]) -> dict[str, Any]:
+    forkee = p.get("forkee") or {}
+    return {"fork_full": forkee.get("full_name") or "?", "fork_url": forkee.get("html_url") or "",
+            "fork_owner": (forkee.get("owner") or {}).get("login") or sender_login(p),
+            "forks": (p.get("repository") or {}).get("forks_count") or 0}
+
+
+def _ctx_repository(p: dict[str, Any]) -> dict[str, Any]:
+    r = p.get("repository") or {}
+    old = ((p.get("changes") or {}).get("repository") or {}).get("name", {}).get("from")
+    return {"repo_description": r.get("description") or "", "private": bool(r.get("private")), "old_name": old or ""}
+
+
+def _ctx_member(p: dict[str, Any]) -> dict[str, Any]:
+    m = p.get("member") or {}
+    team = (p.get("team") or {}).get("name") or ""
+    scope = f"team {team}" if p.get("team") else repo_full(p) if p.get("repository") else \
+        f"org {(p.get('organization') or {}).get('login', '')}"
+    return {"member": m.get("login") or "?", "member_url": m.get("html_url") or "", "team": team, "scope": scope}
+
+
+def _ctx_organization(p: dict[str, Any]) -> dict[str, Any]:
+    user = (p.get("membership") or {}).get("user") or p.get("invitation") or {}
+    verbs = {"member_added": "joined", "member_removed": "left", "member_invited": "was invited to"}
+    return {"member": user.get("login") or "?", "member_url": user.get("html_url") or "",
+            "verb": verbs.get(p.get("action") or "", "")}
+
+
+def _ctx_deployment_status(p: dict[str, Any]) -> dict[str, Any]:
+    ds, dep = p.get("deployment_status") or {}, p.get("deployment") or {}
+    return {"environment": ds.get("environment") or dep.get("environment") or "?",
+            "state": ds.get("state") or "unknown", "ref": dep.get("ref") or "?", "sha": (dep.get("sha") or "")[:7],
+            "state_description": ds.get("description") or "", "environment_url": ds.get("environment_url") or "",
+            "deploy_url": ds.get("target_url") or ds.get("log_url") or ds.get("environment_url") or ""}
+
+
+def _ctx_discussion(p: dict[str, Any]) -> dict[str, Any]:
+    d = p.get("discussion") or {}
+    return {"number": d.get("number") or 0, "discussion_title": d.get("title") or "",
+            "discussion_url": d.get("html_url") or "", "category": (d.get("category") or {}).get("name") or "",
+            "discussion_author": (d.get("user") or {}).get("login") or "", "body": truncate(d.get("body") or "", 1000)}
+
+
+def _ctx_discussion_comment(p: dict[str, Any]) -> dict[str, Any]:
+    d, c = p.get("discussion") or {}, p.get("comment") or {}
+    return {"number": d.get("number") or 0, "discussion_title": d.get("title") or "",
+            "discussion_url": d.get("html_url") or "", "commenter": (c.get("user") or {}).get("login") or sender_login(p),
+            "comment_url": c.get("html_url") or "", "body": truncate(c.get("body") or "", 1000)}
+
+
+def _ctx_check_run(p: dict[str, Any]) -> dict[str, Any]:
+    cr = p.get("check_run") or {}
+    out = cr.get("output") or {}
+    return {"check": cr.get("name") or "?", "status": cr.get("status") or "", "conclusion": cr.get("conclusion") or "",
+            "sha": (cr.get("head_sha") or "")[:7], "check_url": cr.get("html_url") or "",
+            "output_title": out.get("title") or "", "output_summary": truncate(out.get("summary") or "", 1000)}
+
+
+def _ctx_other(p: dict[str, Any]) -> dict[str, Any]:
+    subject, url = _generic_subject(p)
+    return {"subject": str(subject) if subject else "", "subject_url": url or ""}
+
+
+_CTX: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "push": _ctx_push, "create": _ctx_ref, "delete": _ctx_ref, "pull_request": _ctx_pull_request,
+    "pull_request_review": _ctx_pull_request_review, "issues": _ctx_issues, "issue_comment": _ctx_issue_comment,
+    "release": _ctx_release, "workflow_run": _ctx_workflow_run, "star": _ctx_star, "fork": _ctx_fork,
+    "repository": _ctx_repository, "member": _ctx_member, "organization": _ctx_organization,
+    "deployment_status": _ctx_deployment_status, "discussion": _ctx_discussion,
+    "discussion_comment": _ctx_discussion_comment, "check_run": _ctx_check_run, "other": _ctx_other,
+}
+
+
+def event_ctx(kind: str, event: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The template variables for the card `render_event` returned for `event` (`kind` is its first element)."""
+    ctx = _common_ctx(event, payload)
+    fn = _CTX.get(kind)
+    if fn is not None:
+        ctx.update(fn(payload))
+    return ctx
+
+
+# ----- org overview board ------------------------------------------------------
+
+def board_ctx(org: str, repos: list[dict[str, Any]], prs: dict[str, Any], issues: dict[str, Any],
+              ci: dict[str, dict[str, Any]], recent: list[str], *, poll: bool, api_ok: bool) -> dict[str, Any]:
+    """The board's facts as plain values: what `board_embed` draws and what a github.board template can use."""
+    rows = [{"repo": r, "ok": bool(s.get("ok")), "workflow": s.get("name") or "", "url": s.get("url") or ""}
+            for r, s in sorted(ci.items(), key=lambda kv: (kv[1].get("ok", True), kv[0]))]
+    return {"org": org, "org_url": f"https://github.com/{org}", "repo_count": len(repos),
+            "open_prs": prs.get("total_count"), "open_issues": issues.get("total_count"),
+            "ci": rows, "failing": [row["repo"] for row in rows if not row["ok"]], "recent": list(recent),
+            "source": "webhook" + (" + poll" if poll else ""), "api_ok": api_ok}
+
+
+def board_embed(data: dict[str, Any], lab: str) -> discord.Embed:
+    """The org overview board from `board_ctx()` data (the pinned message in STATUS_CHANNEL_ID)."""
+    ok, failing = data["api_ok"], data["failing"]
+    sev = Severity.OK if ok and not failing else (Severity.CRITICAL if failing else Severity.WARNING)
+    e = lab_embed(f"GitHub: {data['org']}", None if ok else "⚠️ GitHub API unreachable — showing cached data",
+                  severity=sev, lab_name=lab, url=data["org_url"])
+    e.add_field(name="Repos", value=str(data["repo_count"]), inline=True)
+    e.add_field(name="Open PRs", value="?" if data["open_prs"] is None else str(data["open_prs"]), inline=True)
+    e.add_field(name="Open issues", value="?" if data["open_issues"] is None else str(data["open_issues"]), inline=True)
+    if data["ci"]:
+        lines = [f"{'🟢' if c['ok'] else '🔴'} [{c['repo']}]({c['url']}) {c['workflow']}" for c in data["ci"][:15]]
+        e.add_field(name="CI (default branch)", value=truncate("\n".join(lines), 1024), inline=False)
+    e.add_field(name="Last events", value=truncate("\n".join(data["recent"]) or "—", 1024), inline=False)
+    e.add_field(name="Source", value=data["source"], inline=True)
+    return e
 
 
 # ----- CI alert state machine -------------------------------------------------

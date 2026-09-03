@@ -223,3 +223,51 @@ async def test_supervisor_retries_with_plain_language(tmp_path, monkeypatch):
     assert attempts == ["T", "T", "T"] and resets == ["default", "default"]
     assert "lost its Discord connection" in pres.last_error and not pres.connected
     assert rt.service_status(rt.services["a"])["state"] == ERROR
+
+
+# ----- several Discord servers, one bot ----------------------------------------------------------------
+def test_servers_and_per_service_server(tmp_path):
+    s = Store(tmp_path / "config" / "periscope.yaml")
+    s.lab.update({"name": "ztechnus.com", "guild_id": "42", "alert_channel_id": "2", "log_level": "DEBUG"})
+    assert s.servers["main"]["name"] == "ztechnus.com" and s.globals["log_level"] == "DEBUG"
+    assert "log_level" not in s.servers["main"] and "name" not in s.globals   # per-server vs global stay apart
+    plex = s.add_server("plex", "Plex")
+    plex.update({"guild_id": "77", "alert_channel_id": "9"})
+    s.services["proxmox"] = {"enabled": True, "presence": "default", "env": {}}
+    s.services["plexrequests"] = {"enabled": True, "presence": "default", "server": "plex", "env": {}}
+    assert s.server_for("proxmox") == "main" and s.server_for("plexrequests") == "plex"
+    assert s.env_for("proxmox")["GUILD_ID"] == "42" and s.env_for("proxmox")["ALERT_CHANNEL_ID"] == "2"
+    env = s.env_for("plexrequests")
+    assert env["GUILD_ID"] == "77" and env["ALERT_CHANNEL_ID"] == "9" and env["LAB_NAME"] == "Plex"
+    assert env["LOG_LEVEL"] == "DEBUG"                                   # global settings follow every server
+    assert s.guild_ids() == {"main": "42", "plex": "77"}
+    # round trip, then remove the second server: its services fall back to the first
+    s.save()
+    s2 = Store.load(s.path)
+    assert set(s2.servers) == {"main", "plex"} and s2.server_for("plexrequests") == "plex"
+    assert s2.remove_server("plex") == ["plexrequests"] and s2.server_for("plexrequests") == "main"
+    assert s2.remove_server("main") == []                                # the last server stays
+
+
+def test_old_config_becomes_one_server(tmp_path):
+    """A config written before multiple servers: the `lab` block turns into the first server, nothing lost."""
+    p = tmp_path / "config" / "periscope.yaml"
+    p.parent.mkdir(parents=True)
+    p.write_text("version: 2\nlab: {name: ztechnus.com, color: 5A189A, guild_id: '42', alert_channel_id: '2',\n"
+                 "  admin_role_ids: ['4'], log_level: WARNING, status_interval_s: 30}\n"
+                 "services: {proxmox: {enabled: true, presence: default, env: {PVE_URL: 'https://pve'}}}\n")
+    s = Store.load(p)
+    assert list(s.servers) == ["main"] and s.servers["main"]["name"] == "ztechnus.com"
+    assert s.servers["main"]["admin_role_ids"] == ["4"] and s.globals == {"log_level": "WARNING", "status_interval_s": 30}
+    env = s.env_for("proxmox")
+    assert env["LAB_NAME"] == "ztechnus.com" and env["GUILD_ID"] == "42" and env["LOG_LEVEL"] == "WARNING"
+    assert env["ADMIN_ROLE_IDS"] == "4" and env["STATUS_INTERVAL_S"] == "30" and env["PVE_URL"] == "https://pve"
+
+
+@pytest.mark.asyncio
+async def test_one_bot_serves_every_server_its_services_use():
+    """A bot registers its commands in each server its services post in — not only the first one."""
+    pres, tree = _presence(guild_id=42, member_of=(42, 77))
+    pres.services = [_service(pres, "proxmox", guild_id=42), _service(pres, "plexrequests", guild_id=77)]
+    await pres.sync_commands()
+    assert sorted(tree.synced) == [42, 77] and pres.missing_guilds == {}

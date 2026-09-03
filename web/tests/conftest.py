@@ -1,5 +1,7 @@
-"""Fixtures: a fake Runtime (real Store + hand-made ServiceSpecs + stub presences with a fake guild), a mocked
-Discord REST API (httpx.MockTransport) and an httpx client with a signed session cookie. No network, no Discord."""
+"""Fixtures: a fake Runtime (real Store + real MessageStore + hand-made ServiceSpecs + stub presences with two
+fake guilds), a mocked Discord REST API (httpx.MockTransport) and an httpx client with a signed session cookie.
+The store holds two Discord servers — `main` (guild 42, the default) and `plex` (guild 77). No network, no
+Discord."""
 
 from __future__ import annotations
 
@@ -10,6 +12,8 @@ import discord
 import httpx
 import pytest
 from periscope import Store
+from periscope.messages import MessageKind, MessageStore
+from periscope.messages import register as register_kinds
 from periscope.service import ServiceSpec, Setting
 from periscope_web.app import create_app
 from periscope_web.auth import SESSION_COOKIE, User
@@ -17,6 +21,7 @@ from periscope_web.discordapi import DiscordAPI
 from periscope_web.logs import LogBuffer
 
 GUILD_ID = 42
+GUILD2_ID = 77
 GOOD_TOKEN = "good-token-abc"
 
 
@@ -65,12 +70,15 @@ class FakeMember:
 
 
 class FakeGuild:
-    def __init__(self, gid=GUILD_ID):
+    def __init__(self, gid=GUILD_ID, name="THE LAB", channels=None, roles=None):
         self.id = gid
+        self.name = name
         self.categories = [FakeCategory(10, "🧪 LAB STATUS")]
-        self.text_channels = [FakeChannel(1001, "lab-status", self.categories[0]), FakeChannel(1002, "lab-alerts", self.categories[0]),
-                              FakeChannel(1003, "git-anthill"), FakeChannel(1004, "op-anthill"), FakeChannel(1005, "general")]
-        self.roles = [FakeRole(1, "@everyone"), FakeRole(2001, "lab-admin", 0xE67E22), FakeRole(2002, "bots", 0x5865F2)]
+        self.text_channels = [FakeChannel(cid, cname, self.categories[0] if cat else None) for cid, cname, cat in
+                              (channels or [(1001, "lab-status", True), (1002, "lab-alerts", True), (1003, "git-anthill", False),
+                                            (1004, "op-anthill", False), (1005, "general", False)])]
+        self.roles = [FakeRole(1, "@everyone")] + [FakeRole(rid, rname, color) for rid, rname, color in
+                                                   (roles or [(2001, "lab-admin", 0xE67E22), (2002, "bots", 0x5865F2)])]
         self.default_role = self.roles[0]
         self.members = {999: FakeMember(999)}
         self.created: list[tuple[str, str]] = []
@@ -120,17 +128,80 @@ class FakeUser:
         return self.name
 
 
+class FakeTextChannel:
+    """A channel a test post can be sent to; remembers what was posted."""
+
+    def __init__(self, cid, name):
+        self.id, self.name = cid, name
+        self.sent: list[discord.Embed] = []
+
+    async def send(self, *, embed=None, **kw):
+        self.sent.append(embed)
+        return SimpleNamespace(id=1)
+
+
 class FakePresence:
-    def __init__(self, name, guild, *, connected=True, uid=999):
+    """A bot that is in one or more servers, the way one presence serves every server its services post in."""
+
+    def __init__(self, name, *guilds, connected=True, uid=999):
         self.name = name
         self.connected = connected
         self.user = FakeUser(uid)
         self.application_id = uid
         self.services = []
-        self._guild = guild
+        self.guilds = list(guilds)
+        self.missing_guilds = {}
+        self.channels = {1001: FakeTextChannel(1001, "lab-status"), 1002: FakeTextChannel(1002, "lab-alerts")}
 
     def get_guild(self, gid):
-        return self._guild if gid == self._guild.id else None
+        return next((g for g in self.guilds if g.id == gid), None)
+
+    def invite_url(self):
+        return f"https://discord.com/oauth2/authorize?client_id={self.application_id}&scope=bot"
+
+    async def get_channel_safe(self, cid):
+        return self.channels.get(int(cid))
+
+
+# ----- fake message kinds ------------------------------------------------------------------------------
+# `pve.*` / `sonarr.*` are free prefixes: the shipped bots register `core.*`, `media.*`, `github.*` and
+# `plexrequests.*`, so nothing real is overwritten when this module is imported alongside their tests.
+def _sample_busy():
+    e = discord.Embed(title="pve1 is busy", description="CPU at **93%** for 3 polls — see <#1002>.", color=0xF1C40F)
+    e.add_field(name="Node", value="pve1", inline=True)
+    e.add_field(name="Load", value="12.4 / 8 cores", inline=True)
+    e.set_footer(text="testlab")
+    return e, {"node": "pve1", "cpu": 93}
+
+
+def _sample_board():
+    e = discord.Embed(title="Cluster board", description="3 nodes up, 0 down", color=0x2ECC71)
+    e.add_field(name="Nodes", value="pve1 · pve2 · pve3", inline=False)
+    return e, {"nodes": 3}
+
+
+def _sample_grab():
+    e = discord.Embed(title="Grabbed: The Expanse", description="S06E01 · 1080p", color=0x3498DB)
+    return e, {"series": "The Expanse"}
+
+
+def _sample_digest():
+    e = discord.Embed(title="Nightly digest", description="nothing broke", color=0x2ECC71)
+    return e, {}
+
+
+register_kinds(
+    MessageKind("pve.node_busy", "Node busy", "posted when a node stays over its CPU threshold",
+                where="the alert channel", where_env="ALERT_CHANNEL_ID", sample=_sample_busy, group="alerts",
+                variables={"node": "the node's name", "cpu": "its CPU use as a percentage"}),
+    MessageKind("pve.board", "Cluster board", "the pinned board, refreshed on a timer",
+                where="the status channel", where_env="STATUS_CHANNEL_ID", sample=_sample_board, group="boards"),
+    MessageKind("sonarr.grabbed", "Grabbed", "posted when Sonarr grabs a release",
+                where="the media channel", where_env="MEDIA_CHANNEL_ID", sample=_sample_grab, group="feed"),
+    # an umbrella name: several services post the same card through one hub, the way the media stack does
+    MessageKind("infra.digest", "Nightly digest", "one card a night for every box in the rack",
+                where="the status channel", where_env="STATUS_CHANNEL_ID", sample=_sample_digest, group="boards"),
+)
 
 
 # ----- fake runtime -----------------------------------------------------------------------------------
@@ -169,6 +240,7 @@ class FakeRuntime:
         self.root = root
         self.data_dir = root / "data"
         self.specs = specs
+        self.messages = MessageStore(store.path.parent / "messages.yaml")   # as the real runtime builds it
         self.presences = presences or {}
         self.services = {}
         self.skipped = {}
@@ -178,7 +250,10 @@ class FakeRuntime:
     def status(self):
         out = {"pid": 1, "started": self.started, "uptime_s": int(time.time() - self.started), "presences": {}, "services": {}}
         for n, p in self.presences.items():
-            out["presences"][n] = {"connected": p.connected, "user": str(p.user) if p.connected else None, "services": [s for s in p.services]}
+            out["presences"][n] = {"connected": p.connected, "user": str(p.user) if p.connected else None,
+                                   "services": [s for s in p.services], "error": None,
+                                   "app_id": str(p.application_id), "invite": p.invite_url(),
+                                   "missing_guilds": {str(k): v for k, v in p.missing_guilds.items()}}
         out["services"] = {k: dict(v) for k, v in self.states.items()}
         return out
 
@@ -187,6 +262,8 @@ def make_store(path) -> Store:
     s = Store(path)
     s.lab.update({"name": "testlab", "guild_id": str(GUILD_ID), "admin_role_ids": ["2001"], "alert_channel_id": "1002",
                   "status_channel_id": "1001"})
+    s.add_server("plex", "Plex land").update({"guild_id": str(GUILD2_ID), "color": "9B59B6", "alert_channel_id": "3002",
+                                              "status_channel_id": "3001", "admin_role_ids": ["4001"]})
     s.web.update({"session_secret": "s" * 32, "oauth_client_id": "cid", "oauth_client_secret": "csecret", "base_url": "http://test"})
     s.presences["default"] = {"token": GOOD_TOKEN, "label": "periscope"}
     s.presences["arr"] = {"token": "", "label": "arr"}
@@ -220,7 +297,9 @@ def discord_handler(calls: list):
         if path == "/api/v10/users/@me":
             return httpx.Response(200, json={"id": "777", "username": "periscope", "bot": True})
         if path == "/api/v10/users/@me/guilds":
-            return httpx.Response(200, json=[{"id": str(GUILD_ID), "name": "THE LAB", "owner": True}, {"id": "43", "name": "Other", "owner": False}])
+            return httpx.Response(200, json=[{"id": str(GUILD_ID), "name": "THE LAB", "owner": True},
+                                             {"id": str(GUILD2_ID), "name": "Plex land", "owner": False},
+                                             {"id": "43", "name": "Other", "owner": False}])
         if path == f"/api/v10/guilds/{GUILD_ID}":
             return httpx.Response(200, json={"id": str(GUILD_ID), "name": "THE LAB", "owner_id": "555"})
         if path == f"/api/v10/guilds/{GUILD_ID}/channels":
@@ -228,6 +307,10 @@ def discord_handler(calls: list):
                                              {"id": "1002", "name": "lab-alerts", "type": 0, "parent_id": "10"}, {"id": "1003", "name": "git-anthill", "type": 0}])
         if path == f"/api/v10/guilds/{GUILD_ID}/roles":
             return httpx.Response(200, json=[{"id": "1", "name": "@everyone"}, {"id": "2001", "name": "lab-admin", "color": 0}, {"id": "2002", "name": "bots"}])
+        if path == f"/api/v10/guilds/{GUILD2_ID}/channels":
+            return httpx.Response(200, json=[{"id": "3001", "name": "plex-status", "type": 0}, {"id": "3002", "name": "plex-alerts", "type": 0}])
+        if path == f"/api/v10/guilds/{GUILD2_ID}/roles":
+            return httpx.Response(200, json=[{"id": "1", "name": "@everyone"}, {"id": "4001", "name": "plex-admin", "color": 0}])
         return httpx.Response(404, json={"message": "Unknown"})
 
     return handler
@@ -237,6 +320,14 @@ def discord_handler(calls: list):
 @pytest.fixture
 def guild():
     return FakeGuild()
+
+
+@pytest.fixture
+def guild2():
+    """The second Discord server the same bot is in (the `plex` server in the store)."""
+    return FakeGuild(GUILD2_ID, name="Plex land",
+                     channels=[(3001, "plex-status", False), (3002, "plex-alerts", False), (3003, "requests", False)],
+                     roles=[(4001, "plex-admin", 0x9B59B6)])
 
 
 @pytest.fixture
@@ -250,8 +341,8 @@ def api_calls():
 
 
 @pytest.fixture
-def runtime(store, tmp_path, guild):
-    pres = FakePresence("default", guild)
+def runtime(store, tmp_path, guild, guild2):
+    pres = FakePresence("default", guild, guild2)
     pres.services = ["pve", "github"]
     states = {"pve": {"state": "running", "presence": "default", "error": None},
               "github": {"state": "needs setup", "presence": "default", "error": "needs Github Org — fill them in under Settings", "fix": "settings"}}

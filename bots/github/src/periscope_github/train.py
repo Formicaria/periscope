@@ -9,6 +9,7 @@
 The run is discovered by the poller (or a workflow_run webhook), a card is posted to the CI channel
 immediately, and `tick()` refreshes every tracked run until it completes. Finished runs get a final
 green/red edit with the total duration; the alert state machine still fires for default-branch failures.
+Every post and edit goes through the user's template for the `github.ci_train` kind (Messages page).
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ JOB_ICON = {
 }
 RUN_COLOR = {"success": GREEN, "failure": RED, "timed_out": RED, "cancelled": GREY, "skipped": GREY}
 MAX_JOB_LINES = 25
+KIND = "github.ci_train"   # the message kind the card is customised under (Messages page)
 
 
 def job_state(job: dict[str, Any]) -> str:
@@ -57,16 +59,22 @@ def job_line(job: dict[str, Any]) -> str:
     return f"{icon} **{name}**  {detail}"
 
 
-def render_train(repo: str, run: dict[str, Any], jobs: list[dict[str, Any]], lab: str) -> discord.Embed:
+def _elapsed(run: dict[str, Any], done: bool, now: dt.datetime | None) -> str:
+    started = parse_ts(run.get("run_started_at") or run.get("created_at"))
+    ended = parse_ts(run.get("updated_at")) if done else (now or dt.datetime.now(dt.timezone.utc))
+    return human_duration((ended - started).total_seconds()) if started and ended else "—"
+
+
+def render_train(repo: str, run: dict[str, Any], jobs: list[dict[str, Any]], lab: str,
+                 now: dt.datetime | None = None) -> discord.Embed:
+    """The card; `now` fixes the clock a running run's elapsed time is measured against (previews, tests)."""
     status = run.get("status") or "queued"
     conclusion = run.get("conclusion")
     done = status == "completed"
     head_icon = JOB_ICON.get(conclusion or status, "🟡") if done else ("🟡" if status == "in_progress" else "⚪")
     color = RUN_COLOR.get(conclusion or "", GREY) if done else (YELLOW if status == "in_progress" else GREY)
     title = f"[{repo}] {head_icon} {run.get('name', 'workflow')} · run #{run.get('run_number', '?')} on {run.get('head_branch', '?')}"
-    started = parse_ts(run.get("run_started_at") or run.get("created_at"))
-    ended = parse_ts(run.get("updated_at")) if done else dt.datetime.now(dt.timezone.utc)
-    elapsed = human_duration((ended - started).total_seconds()) if started and ended else "—"
+    elapsed = _elapsed(run, done, now)
     who = (run.get("triggering_actor") or run.get("actor") or {}).get("login") or "?"
     head = f"`{(run.get('head_sha') or '')[:7]}` {truncate(run.get('display_title') or '', 70)} — {who}"
     tail = f"{(conclusion or status).replace('_', ' ')} in {elapsed}" if done else f"{status.replace('_', ' ')} · {elapsed}"
@@ -82,6 +90,24 @@ def render_train(repo: str, run: dict[str, Any], jobs: list[dict[str, Any]], lab
         actor = run.get("triggering_actor") or run.get("actor") or {}
         e.set_author(name=who, url=actor.get("html_url"), icon_url=actor.get("avatar_url"))
     return e
+
+
+def train_ctx(repo: str, run: dict[str, Any], jobs: list[dict[str, Any]], now: dt.datetime | None = None) -> dict[str, Any]:
+    """The card's template variables (Messages page): the run, where it stands, and its jobs as plain values."""
+    status, conclusion = run.get("status") or "queued", run.get("conclusion") or ""
+    done = status == "completed"
+    actor = run.get("triggering_actor") or run.get("actor") or {}
+    return {
+        "repo": repo, "workflow": run.get("name") or "workflow", "branch": run.get("head_branch") or "?",
+        "run_number": run.get("run_number") or 0, "status": status, "conclusion": conclusion, "done": done,
+        "run_url": run.get("html_url") or "", "sha": (run.get("head_sha") or "")[:7],
+        "commit_title": run.get("display_title") or "", "actor": actor.get("login") or "?",
+        "actor_url": actor.get("html_url") or "", "actor_avatar": actor.get("avatar_url") or "",
+        "elapsed": _elapsed(run, done, now),
+        "jobs": [{"name": j.get("name") or "job", "status": j.get("status") or "queued",
+                  "conclusion": j.get("conclusion") or "", "state": job_state(j), "line": job_line(j)} for j in jobs],
+        "jobs_done": sum(1 for j in jobs if j.get("status") == "completed"), "job_count": len(jobs),
+    }
 
 
 class CiTrains:
@@ -119,8 +145,12 @@ class CiTrains:
         if ch is None:
             return False
         jobs = await self._jobs(repo, run["id"])
+        embed = self.card(repo, run, jobs)
+        if embed is None:
+            log.debug("no CI train for %s#%s: %s is switched off on the Messages page", repo, rid, KIND)
+            return False
         try:
-            msg = await ch.send(embed=render_train(repo, run, jobs, self.bot.lab_name))
+            msg = await ch.send(embed=embed)
         except discord.HTTPException as e:
             log.error("could not post CI train for %s#%s: %s", repo, rid, e)
             return False
@@ -142,7 +172,9 @@ class CiTrains:
             except Exception:  # noqa: BLE001
                 log.debug("train %s/%s: refresh failed", repo, rid, exc_info=True)
                 continue
-            await self._edit(info, render_train(repo, run, jobs, self.bot.lab_name))
+            embed = self.card(repo, run, jobs)
+            if embed is not None:   # switched off since the card was posted: leave it as it is
+                await self._edit(info, embed)
             if run.get("status") == "completed":
                 runs.pop(rid, None)
                 self._save(runs)
@@ -159,6 +191,11 @@ class CiTrains:
                     self._save(runs)
 
     # -- helpers -----------------------------------------------------------------------------
+    def card(self, repo: str, run: dict[str, Any], jobs: list[dict[str, Any]]) -> discord.Embed | None:
+        """The card as it goes out: the bot's rendering through the user's template (None = switched off)."""
+        embed = render_train(repo, run, jobs, self.bot.lab_name)
+        return self.bot.messages.apply(KIND, embed, train_ctx(repo, run, jobs))
+
     async def _jobs(self, repo: str, run_id: int) -> list[dict[str, Any]]:
         try:
             return await self.client.workflow_run_jobs(repo, run_id)

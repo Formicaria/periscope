@@ -9,11 +9,12 @@ from typing import Any
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from periscope import LabBot, PaginatorView, RefreshView, Severity, StatusBoard, human_bytes, lab_embed, truncate
+from periscope import LabBot, PaginatorView, RefreshView, StatusBoard, human_bytes, lab_embed, truncate
 
 from ..client import GithubClient, Reachability
 from ..dispatch import get_dispatcher
-from ..render import _CONCLUSION, parse_ts
+from ..messages import BOARD_KIND
+from ..render import _CONCLUSION, board_ctx, board_embed, parse_ts
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class GithubCommands(commands.Cog):
         self.client: GithubClient = bot.gh_client  # type: ignore[attr-defined]
         self.dispatcher = get_dispatcher(bot)
         self.reach = Reachability(bot, "GitHub API")
-        self.board = StatusBoard(bot, key="github")
+        self.board = StatusBoard(bot, key="github", kind=BOARD_KIND)
         self._repos: list[dict[str, Any]] = []
         self._repos_at = 0.0
         self.status_loop.change_interval(seconds=bot.settings.status_interval_s)
@@ -261,7 +262,9 @@ class GithubCommands(commands.Cog):
 
     # ----- status board --------------------------------------------------------------------
 
-    async def build_board(self) -> discord.Embed:
+    async def board_data(self) -> dict[str, Any]:
+        """What the board shows, as plain values: the API's counts (cached ones when it is down) + CI state and
+        the latest events from the dispatcher. Also the variables a github.board template can use."""
         try:
             repos = await self.repos()
             prs = await self.client.open_prs(per_page=1)
@@ -271,28 +274,22 @@ class GithubCommands(commands.Cog):
         except Exception as e:  # noqa: BLE001
             await self.reach.failure(e)
             repos, prs, issues, ok = self._repos, {}, {}, False
-        ci = self.dispatcher.ci_status()
-        red = [r for r, s in ci.items() if not s.get("ok")]
-        sev = Severity.OK if ok and not red else (Severity.CRITICAL if red else Severity.WARNING)
-        e = lab_embed(f"GitHub: {self.cfg.org}", None if ok else "⚠️ GitHub API unreachable — showing cached data",
-                      severity=sev, lab_name=self.bot.lab_name, url=f"https://github.com/{self.cfg.org}")
-        e.add_field(name="Repos", value=str(len(repos)), inline=True)
-        e.add_field(name="Open PRs", value=str(prs.get("total_count", "?")), inline=True)
-        e.add_field(name="Open issues", value=str(issues.get("total_count", "?")), inline=True)
-        if ci:
-            lines = [f"{'🟢' if s.get('ok') else '🔴'} [{r}]({s.get('url')}) {s.get('name')}"
-                     for r, s in sorted(ci.items(), key=lambda kv: (kv[1].get("ok", True), kv[0]))]
-            e.add_field(name="CI (default branch)", value=truncate("\n".join(lines[:15]), 1024), inline=False)
-        recent = self.dispatcher.recent()
-        e.add_field(name="Last events", value=truncate("\n".join(recent) or "—", 1024), inline=False)
-        source = "webhook" + (" + poll" if self.cfg.poll_enabled else "")
-        e.add_field(name="Source", value=source, inline=True)
-        return e
+        return board_ctx(self.cfg.org, repos, prs, issues, self.dispatcher.ci_status(), self.dispatcher.recent(),
+                         poll=self.cfg.poll_enabled, api_ok=ok)
+
+    async def build_board(self) -> discord.Embed:
+        """The board as it should look now, through the user's template — the 🔄 button's builder, so a refresh
+        matches the scheduled render (which StatusBoard customises itself). A switched-off board shows plain here;
+        the next scheduled render takes it down."""
+        data = await self.board_data()
+        embed = board_embed(data, self.bot.lab_name)
+        return self.bot.messages.apply(BOARD_KIND, embed, data) or embed
 
     async def render_board(self) -> discord.Message | None:
         try:
-            embed = await self.build_board()
-            return await self.board.render(embed, view=RefreshView(self.build_board, custom_id="periscope:gh:refresh"))
+            data = await self.board_data()
+            return await self.board.render(board_embed(data, self.bot.lab_name), ctx=data,
+                                           view=RefreshView(self.build_board, custom_id="periscope:gh:refresh"))
         except Exception:  # noqa: BLE001
             log.exception("status board render failed")
             return None

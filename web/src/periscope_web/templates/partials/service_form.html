@@ -18,7 +18,16 @@
           {% endfor %}
         </select>
       </label>
+      <label class="flex items-center gap-2 text-sm">
+        <span class="opacity-70">in server</span>
+        <select name="_server" class="select select-bordered select-sm" title="the Discord server this service posts in">
+          {% for skey, slabel in servers %}
+          <option value="{{ skey }}" {% if skey == server %}selected{% endif %}>{{ slabel }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <a href="/presences" class="link link-hover text-xs opacity-60">manage bots</a>
+      <a href="/discord" class="link link-hover text-xs opacity-60">manage servers</a>
     </div>
   </div></section>
 
@@ -40,7 +49,7 @@
         </label>
         {% elif f.is_select %}
         <select id="f-{{ f.key }}" name="{{ f.key }}" class="select select-bordered select-sm w-full">
-          <option value="">{{ f.lab_default or ('—' if f.type != 'choice' else 'default') }}</option>
+          <option value="">{{ f.server_default or ('—' if f.type != 'choice' else 'default') }}</option>
           {% if f.unknown_option %}<option value="{{ f.unknown_option }}" selected class="mono">{{ f.unknown_option }} (not found)</option>{% endif %}
           {% for value, label in f.options %}
           <option value="{{ value }}" {% if value == f.value %}selected{% endif %}>{{ label }}</option>
@@ -56,7 +65,7 @@
           {% endif %}
         </div>
         {% else %}
-        <input type="{{ f.input_type }}" id="f-{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" placeholder="{{ f.lab_default or f.placeholder }}"
+        <input type="{{ f.input_type }}" id="f-{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" placeholder="{{ f.server_default or f.placeholder }}"
                class="input input-bordered input-sm w-full {% if f.type in ('channel', 'role', 'int', 'list') %}mono{% endif %}" {% if f.type == 'int' %}inputmode="numeric"{% endif %}>
         {% endif %}
         {% if f.help and f.type != 'bool' %}<span class="label-text-alt opacity-60 text-xs mt-1">{{ f.help }}</span>{% endif %}

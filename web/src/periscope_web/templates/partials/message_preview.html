@@ -1,0 +1,17 @@
+{# The two panes inside #preview: what the service ships, and what the form holds right now. #}
+<div class="space-y-2">
+  <div class="text-[11px] uppercase tracking-widest opacity-50">Default</div>
+  {% if default.error %}
+  <div class="alert alert-warning py-2 px-3 text-xs"><span class="break-words">{{ default.error }}</span></div>
+  {% else %}
+  {% with embed = default.embed %}{% include "partials/embed_preview.html" %}{% endwith %}
+  {% endif %}
+</div>
+<div class="space-y-2">
+  <div class="text-[11px] uppercase tracking-widest opacity-50">Yours</div>
+  {% if yours.error %}
+  <div class="alert alert-error py-2 px-3 text-xs" id="preview-error"><span class="break-words">{{ yours.error }}</span></div>
+  {% else %}
+  {% with embed = yours.embed %}{% include "partials/embed_preview.html" %}{% endwith %}
+  {% endif %}
+</div>

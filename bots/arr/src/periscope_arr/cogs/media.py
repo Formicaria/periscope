@@ -1,11 +1,16 @@
-"""/arr nowplaying (Plex + Jellyfin) and the live "Media stack" status board, one per media hub."""
+"""/arr nowplaying (Plex + Jellyfin) and the live "Media stack" status board, one per media hub.
+
+The board is the `media.board` message kind: `board_ctx` turns what the probes returned into plain facts,
+`board_embed` draws them, and the hub owner's `bot.messages` (through the hub's BoardHost) applies the user's
+template on render.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import discord
 from discord.ext import commands, tasks
@@ -18,6 +23,8 @@ from . import register
 log = logging.getLogger(__name__)
 
 MediaServer = Literal["plex", "jellyfin"]
+BOARD_KIND = "media.board"    # the message kind the board is customised under (Messages page)
+MEDIA_SERVERS = ("plex", "jellyfin")
 
 
 @dataclass
@@ -89,13 +96,89 @@ def sum_diskspace(entries: list[dict]) -> tuple[float, float]:
     return sum(f for f, _ in seen.values()), sum(t for _, t in seen.values())
 
 
+# ----- the board as data + drawing (pure, so the Messages page can preview it from sample data) -------------
+
+def board_ctx(results: dict[str, tuple[bool, Any]], streams: list[Stream], errors: list[str],
+              disk_entries: list[dict], *, plex: bool, jellyfin: bool) -> dict[str, Any]:
+    """The board's facts as plain values: what `board_embed` draws and what a media.board template can use.
+
+    `results` maps each probed service, in board order, to (answered, what it said): the queue for Sonarr /
+    Radarr / Lidarr, health messages for Prowlarr, transfer info for qBittorrent, the queue summary for SABnzbd —
+    or the error when it did not answer. `streams` and `errors` are what `_streams()` found on the media servers
+    `plex` / `jellyfin` say are configured; `disk_entries` are the apps' `diskspace` rows.
+    """
+    services: list[dict[str, Any]] = []
+    queues: list[dict[str, Any]] = []
+    qbit: dict[str, Any] = {}
+    sab: dict[str, Any] = {}
+    for name, (ok, res) in results.items():
+        entry = {"name": name, "ok": ok, "error": "" if ok else truncate(str(res), 200), "issues": 0}
+        if ok and name == "prowlarr":
+            entry["issues"] = len(res) if res else 0
+        elif ok and name == "qbittorrent":
+            qbit = {"down": res.get("dl_info_speed"), "up": res.get("up_info_speed")}
+        elif ok and name == "sabnzbd":
+            sab = {"down": float(res.get("kbpersec") or 0) * 1024, "active": res.get("noofslots", 0)}
+        elif ok:
+            queues.append({"app": name, "queued": len(res),
+                           "downloading": sum(1 for i in res if i.get("status") == "downloading")})
+        services.append(entry)
+    for name, on in (("plex", plex), ("jellyfin", jellyfin)):
+        if on:
+            error = next((e for e in errors if e.startswith(name)), "")
+            services.append({"name": name, "ok": not error, "error": error.split(": ", 1)[-1] if error else "",
+                             "issues": 0})
+    disk: dict[str, Any] = {}
+    if disk_entries:
+        free, total = sum_diskspace(disk_entries)
+        disk = {"free": free, "total": total, "used_pct": (total - free) / total * 100 if total else 0}
+    return {
+        "services": services, "down": [s["name"] for s in services if not s["ok"]], "queues": queues,
+        "qbittorrent": qbit, "sabnzbd": sab,
+        "streams": [{"server": s.server, "user": s.user, "title": s.title, "player": s.player, "pct": round(s.pct, 1),
+                     "method": s.method, "paused": s.paused} for s in streams],
+        "disk": disk,
+    }
+
+
+def board_embed(data: dict[str, Any], lab_name: str | None) -> discord.Embed:
+    """The Media stack board from `board_ctx()` data (the pinned message in STATUS_CHANNEL_ID)."""
+    dots = [f"{status_dot(s['ok'])} {s['name']}" + (f" ({s['issues']} issues)" if s["ok"] and s["issues"] else "")
+            for s in data["services"]]
+    sev = Severity.CRITICAL if data["down"] else Severity.OK
+    e = lab_embed("Media stack", "  ".join(dots), severity=sev, lab_name=lab_name)
+    if data["queues"]:
+        queues = [f"{q['app']}: **{q['queued']}** queued, {q['downloading']} downloading" for q in data["queues"]]
+        e.add_field(name="Queues", value="\n".join(queues), inline=False)
+    speeds: list[str] = []
+    if data["qbittorrent"]:
+        q = data["qbittorrent"]
+        speeds.append(f"qBit ⬇️ {human_bytes(q['down'])}/s ⬆️ {human_bytes(q['up'])}/s")
+    if data["sabnzbd"]:
+        s = data["sabnzbd"]
+        speeds.append(f"SAB ⬇️ {human_bytes(s['down'])}/s · {s['active']} active")
+    if speeds:
+        e.add_field(name="Transfer", value="\n".join(speeds), inline=False)
+    if any(s["name"] in MEDIA_SERVERS for s in data["services"]):
+        streams = data["streams"]
+        lines = [f"{'⏸️' if s['paused'] else '▶️'} {truncate(s['title'], 60)} — {s['user']}" for s in streams[:8]]
+        if len(streams) > 8:
+            lines.append(f"… and {len(streams) - 8} more")
+        e.add_field(name=f"Streams ({len(streams)})", value="\n".join(lines) or "none", inline=False)
+    if data["disk"]:
+        d = data["disk"]
+        e.add_field(name="Disk", inline=False,
+                    value=f"`{progress_bar(d['used_pct'])}` {human_bytes(d['free'])} free of {human_bytes(d['total'])}")
+    return e
+
+
 class Media(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.hub = bot.media_hub
         self.hub.media_cog = self
         self.svc = self.hub.svc
-        self.board = StatusBoard(self.hub.board_host, key="arr")
+        self.board = StatusBoard(self.hub.board_host, key="arr", kind=BOARD_KIND)
         self.view = RefreshView(self.build_board, custom_id="periscope_arr:refresh")
         bot.add_view(self.view)
         if not self.hub.split:  # v1: under /arr; v2: the hub builds /plex nowplaying, /jellyfin nowplaying, /<app> board
@@ -164,73 +247,43 @@ class Media(commands.Cog):
         await note_reachability(self.bot, name, True)
         return True, result
 
-    async def build_board(self) -> discord.Embed:
-        dots: list[str] = []
-        queues: list[str] = []
+    async def board_data(self) -> dict[str, Any]:
+        """Probe every configured service and reduce the answers to the board's facts (`board_ctx`)."""
+        results: dict[str, tuple[bool, Any]] = {}
         disk_entries: list[dict] = []
-        worst_down = False
-
         for app, client in self.svc.arr.items():
             if app == "prowlarr":
-                ok, res = await self._probe(app, client.health())
-                dots.append(f"{status_dot(ok)} {app}" + (f" ({len(res)} issues)" if ok and res else ""))
+                results[app] = await self._probe(app, client.health())
             else:
-                ok, res = await self._probe(app, client.queue())
-                dots.append(f"{status_dot(ok)} {app}")
+                ok, res = results[app] = await self._probe(app, client.queue())
                 if ok:
-                    active = sum(1 for i in res if i.get("status") == "downloading")
-                    queues.append(f"{app}: **{len(res)}** queued, {active} downloading")
                     try:
                         disk_entries += await client.diskspace()
                     except Exception as e:
                         log.debug("%s diskspace failed: %s", app, e)
-            worst_down |= not ok
-
-        speeds: list[str] = []
         if self.svc.qbit:
-            ok, res = await self._probe("qbittorrent", self.svc.qbit.transfer_info())
-            dots.append(f"{status_dot(ok)} qbittorrent")
-            if ok:
-                speeds.append(f"qBit ⬇️ {human_bytes(res.get('dl_info_speed'))}/s ⬆️ {human_bytes(res.get('up_info_speed'))}/s")
-            worst_down |= not ok
+            results["qbittorrent"] = await self._probe("qbittorrent", self.svc.qbit.transfer_info())
         if self.svc.sab:
-            ok, res = await self._probe("sabnzbd", self.svc.sab.queue())
-            dots.append(f"{status_dot(ok)} sabnzbd")
-            if ok:
-                speeds.append(f"SAB ⬇️ {human_bytes(float(res.get('kbpersec') or 0) * 1024)}/s · {res.get('noofslots', 0)} active")
-            worst_down |= not ok
-
+            results["sabnzbd"] = await self._probe("sabnzbd", self.svc.sab.queue())
         streams, errors = await self._streams()
-        if self.svc.plex:
-            dots.append(f"{status_dot(not any(e.startswith('plex') for e in errors))} plex")
-        if self.svc.jellyfin:
-            dots.append(f"{status_dot(not any(e.startswith('jellyfin') for e in errors))} jellyfin")
-        worst_down |= bool(errors)
+        return board_ctx(results, streams, errors, disk_entries,
+                         plex=bool(self.svc.plex), jellyfin=bool(self.svc.jellyfin))
 
-        sev = Severity.CRITICAL if worst_down else Severity.OK
-        e = lab_embed("Media stack", "  ".join(dots), severity=sev, lab_name=self.bot.lab_name)
-        if queues:
-            e.add_field(name="Queues", value="\n".join(queues), inline=False)
-        if speeds:
-            e.add_field(name="Transfer", value="\n".join(speeds), inline=False)
-        if self.svc.plex or self.svc.jellyfin:
-            lines = [f"{'⏸️' if s.paused else '▶️'} {truncate(s.title, 60)} — {s.user}" for s in streams[:8]]
-            if len(streams) > 8:
-                lines.append(f"… and {len(streams) - 8} more")
-            e.add_field(name=f"Streams ({len(streams)})", value="\n".join(lines) or "none", inline=False)
-        if disk_entries:
-            free, total = sum_diskspace(disk_entries)
-            used_pct = (total - free) / total * 100 if total else 0
-            e.add_field(name="Disk", value=f"`{progress_bar(used_pct)}` {human_bytes(free)} free of {human_bytes(total)}",
-                        inline=False)
-        return e
+    async def build_board(self) -> discord.Embed:
+        """The board as it should look now, through the user's template — the 🔄 button's and `/<app> board`'s
+        builder, so they match the scheduled render (which StatusBoard customises itself). A switched-off board
+        shows plain here; the next scheduled render takes it down."""
+        data = await self.board_data()
+        embed = board_embed(data, self.bot.lab_name)
+        return self.bot.messages.apply(BOARD_KIND, embed, data) or embed
 
     @tasks.loop(seconds=60)
     async def status_loop(self):
         if not self.bot.settings.status_channel_id:
             return
         try:
-            await self.board.render(await self.build_board(), view=self.view)
+            data = await self.board_data()
+            await self.board.render(board_embed(data, self.bot.lab_name), ctx=data, view=self.view)
         except Exception:
             log.exception("status board render failed")
 

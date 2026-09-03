@@ -12,7 +12,7 @@
     </div>
     <div class="text-xs flex flex-wrap items-center gap-x-3 gap-y-1 opacity-80">
       {% if card.enabled or card.presence_has_token %}
-      <span title="the Discord bot this service posts as">posts as <a href="/presences" class="link link-hover">{{ card.presence_label }}</a>{% if card.presence_user %} · {{ card.presence_user }}{% endif %}</span>
+      <span title="the Discord bot this service posts as">posts as <a href="/presences" class="link link-hover">{{ card.presence_label }}</a>{% if card.presence_user %} · {{ card.presence_user }}{% endif %}{% if card.server_label %} in <a href="/discord" class="link link-hover" title="the Discord server it posts in">{{ card.server_label }}</a>{% endif %}</span>
       {% endif %}
       {% if card.needs_webhook and card.enabled %}<span class="mono" title="inbound webhook path(s) on the shared listener">{{ card.webhook_paths | join(' ') }}</span>{% endif %}
     </div>

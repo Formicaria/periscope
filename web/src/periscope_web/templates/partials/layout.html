@@ -1,11 +1,19 @@
 <div class="card bg-base-200 shadow-sm" id="layout-card">
   <div class="card-body p-4 gap-3">
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <h3 class="text-xs uppercase tracking-widest opacity-60">Channel layout</h3>
-      <button class="btn btn-ghost btn-xs ml-auto" hx-get="/discord/layout" hx-target="#layout-card" hx-swap="outerHTML" title="refresh">↻</button>
+      {% if layout.servers | length > 1 %}
+      <select name="server" class="select select-bordered select-xs" title="which server this acts on"
+              hx-get="/discord/layout" hx-target="#layout-card" hx-swap="outerHTML" hx-trigger="change">
+        {% for key, label in layout.servers %}<option value="{{ key }}" {% if key == layout.server %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      {% else %}
+      <span class="text-xs opacity-50">{{ layout.server_label }}</span>
+      {% endif %}
+      <button class="btn btn-ghost btn-xs ml-auto" hx-get="/discord/layout" hx-vals='{"server": "{{ layout.server }}"}' hx-target="#layout-card" hx-swap="outerHTML" title="refresh">↻</button>
     </div>
     {% if not layout.available %}
-    <p class="text-xs opacity-70">Channels cannot be listed yet: set the server id and a presence token{% if not layout.can_act %} (none yet){% else %} — the bot must be a member of the server{% endif %}.</p>
+    <p class="text-xs opacity-70">Channels cannot be listed yet: set this server's id and a bot token{% if not layout.can_act %} (none yet){% else %} — the bot must be a member of the server{% endif %}.</p>
     {% endif %}
     <div class="grid gap-4 sm:grid-cols-2">
       <div>
@@ -32,13 +40,13 @@
       </div>
     </div>
     <div class="card-actions items-center gap-2 mt-2">
-      <button class="btn btn-primary btn-sm" hx-post="/discord/layout/create" hx-target="#layout-card" hx-swap="outerHTML" hx-indicator="this"
-              {% if not layout.can_act %}disabled{% endif %} hx-confirm="Create the missing convention roles, categories and channels in the lab server?">
+      <button class="btn btn-primary btn-sm" hx-post="/discord/layout/create" hx-vals='{"server": "{{ layout.server }}"}' hx-target="#layout-card" hx-swap="outerHTML" hx-indicator="this"
+              {% if not layout.can_act %}disabled{% endif %} hx-confirm="Create the missing convention roles, categories and channels in {{ layout.server_label }}?">
         <span class="htmx-indicator loading loading-spinner loading-xs"></span>Create missing</button>
-      <button class="btn btn-ghost btn-sm" hx-post="/discord/layout/git" hx-target="#layout-card" hx-swap="outerHTML" hx-indicator="this"
-              {% if not layout.can_act %}disabled{% endif %} hx-confirm="Apply the #git-* (humans read-only, bots post) and #op-* (bots muted) permissions?">
+      <button class="btn btn-ghost btn-sm" hx-post="/discord/layout/git" hx-vals='{"server": "{{ layout.server }}"}' hx-target="#layout-card" hx-swap="outerHTML" hx-indicator="this"
+              {% if not layout.can_act %}disabled{% endif %} hx-confirm="Apply the #git-* (humans read-only, bots post) and #op-* (bots muted) permissions in {{ layout.server_label }}?">
         <span class="htmx-indicator loading loading-spinner loading-xs"></span>Apply git/op permissions</button>
-      <button class="btn btn-ghost btn-xs" hx-post="/discord/layout/git" hx-vals='{"dry": "1"}' hx-target="#layout-card" hx-swap="outerHTML" {% if not layout.can_act %}disabled{% endif %}>dry run</button>
+      <button class="btn btn-ghost btn-xs" hx-post="/discord/layout/git" hx-vals='{"dry": "1", "server": "{{ layout.server }}"}' hx-target="#layout-card" hx-swap="outerHTML" {% if not layout.can_act %}disabled{% endif %}>dry run</button>
     </div>
     <p class="text-xs opacity-60">#git-&lt;project&gt; feeds and #op-&lt;project&gt; discussion channels are created by hand (any category); the permissions button applies the convention — the same as <span class="mono">periscope layout</span>.</p>
     {% if report %}

@@ -9,6 +9,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from periscope import JsonState, WebhookServer
+from periscope.messages import Messages
 
 from periscope_github.config import GithubSettings
 from periscope_github.dispatch import Dispatcher
@@ -47,6 +48,7 @@ class FakeBot:
         self.lab_name = "THE LAB"
         self.settings = SimpleNamespace(alert_channel_id=1, status_channel_id=None)
         self.alerts = FakeAlerts()
+        self.messages = Messages()   # no customisations: every card goes out as rendered
         self.channels = {1: FakeChannel(1), 123: FakeChannel(123)}
         self.gh_settings = cfg
         self.webhook = None

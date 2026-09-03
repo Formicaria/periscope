@@ -11,7 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..common import RESULT_PREFIX, build_invite_embed, check_cooldown, find_email, is_member, valid_email
+from ..common import INVITE_KIND, RESULT_PREFIX, check_cooldown, find_email, is_member, sticky_embed, valid_email
 from ..context import PlexRequests, slash
 
 log = logging.getLogger(__name__)
@@ -68,6 +68,10 @@ class InvitesCog(commands.Cog):
 
     def view(self) -> InviteView:
         return InviteView(self)
+
+    def embed(self) -> discord.Embed | None:
+        """The sticky invite embed as customised on the Messages page (None = switched off)."""
+        return sticky_embed(self.bot, INVITE_KIND, self.cfg)
 
     # ----- roles -----
 
@@ -158,7 +162,9 @@ class InvitesCog(commands.Cog):
             await message.channel.send(f"{message.author.mention} {note} {summary}", delete_after=45)
         except discord.HTTPException:
             pass
-        await self.ctx.sticky.restick(message.channel, INVITE_MESSAGE_KEY, build_invite_embed(self.cfg), self.view())
+        embed = self.embed()
+        if embed is not None:
+            await self.ctx.sticky.restick(message.channel, INVITE_MESSAGE_KEY, embed, self.view())
 
     # ----- events -----
 
@@ -179,7 +185,12 @@ class InvitesCog(commands.Cog):
         if channel is None:
             log.error("could not find the invite channel (#%s / %s)", self.cfg.channel_name, self.cfg.channel_id)
             return
-        await self.ctx.sticky.ensure(channel, INVITE_MESSAGE_KEY, build_invite_embed(self.cfg), self.view())
+        embed = self.embed()
+        if embed is None:
+            log.info("[%s] the invite embed is switched off (Messages page) — not posting it in #%s", self.bot.name,
+                     getattr(channel, "name", channel))
+        else:
+            await self.ctx.sticky.ensure(channel, INVITE_MESSAGE_KEY, embed, self.view())
         await self.ensure_role(channel.guild)
 
 

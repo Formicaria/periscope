@@ -10,11 +10,14 @@ from typing import TYPE_CHECKING
 import discord
 
 from .embeds import Severity, lab_embed, truncate
+from .messages import MessageKind, register
 
 if TYPE_CHECKING:
     from .bot import LabBot
 
 log = logging.getLogger(__name__)
+
+ALERT_KIND, RESOLVED_KIND = "core.alert", "core.alert_resolved"
 
 
 @dataclass
@@ -74,6 +77,12 @@ class AlertRouter:
 
         existing = self._state.get(alert.fingerprint)
         embed = alert.to_embed(self.bot.settings.lab_name)
+        messages = getattr(self.bot, "messages", None)
+        if messages is not None:
+            embed = messages.apply(ALERT_KIND, embed, alert_ctx(alert))
+            if embed is None:
+                log.info("alert %s not posted: alerts are switched off on the Messages page", alert.fingerprint)
+                return None
         msg: discord.Message | None = None
         if existing:
             try:
@@ -105,9 +114,13 @@ class AlertRouter:
         old = msg.embeds[0]
         e = discord.Embed.from_dict(old.to_dict())
         e.color = Severity.OK.color
-        e.title = f"🟢 RESOLVED: {old.title.split(' ', 1)[-1] if old.title else ''}".strip()
+        bare = old.title.split(" ", 1)[-1] if old.title else ""
+        e.title = f"🟢 RESOLVED: {bare}".strip()
         if note:
             e.add_field(name="Resolution", value=truncate(note, 1024), inline=False)
+        messages = getattr(self.bot, "messages", None)
+        if messages is not None:
+            e = messages.apply(RESOLVED_KIND, e, {"alert_title": bare, "note": note or "", "severity": "ok", "fingerprint": fingerprint}) or e
         await msg.edit(content=None, embed=e)
         return True
 
@@ -116,3 +129,36 @@ class AlertRouter:
         # the alerts namespace always hangs off the root, so walk to it from there.
         prefix = self._state._prefix
         return [k[len(prefix):] for k in self._state._p._data if k.startswith(prefix)]
+
+
+# ----- message kinds (Messages page) ------------------------------------------------------------------------
+def alert_ctx(alert: Alert, resolved: bool = False) -> dict:
+    return {"alert_title": alert.title, "severity": "ok" if resolved else alert.severity.value, "fingerprint": alert.fingerprint,
+            "note": "", "extra": dict(alert.fields)}
+
+
+def _sample_alert() -> tuple[discord.Embed, dict]:
+    a = Alert(fingerprint="pve:node:pve1:cpu", title="High CPU on pve1", description="CPU at **93%** for 3 polls (threshold 85%).",
+              severity=Severity.WARNING, fields={"Node": "pve1", "Load": "12.4 / 8 cores"}, url="https://pve.example:8006")
+    return a.to_embed("my-lab"), alert_ctx(a)
+
+
+def _sample_resolved() -> tuple[discord.Embed, dict]:
+    a = Alert(fingerprint="pve:node:pve1:cpu", title="High CPU on pve1", description="CPU at **93%** for 3 polls (threshold 85%).",
+              severity=Severity.WARNING, fields={"Node": "pve1", "Load": "12.4 / 8 cores"})
+    e = a.to_embed("my-lab", resolved=True)
+    e.title = "🟢 RESOLVED: High CPU on pve1"
+    e.add_field(name="Resolution", value="CPU back to 41%", inline=False)
+    return e, {**alert_ctx(a, resolved=True), "note": "CPU back to 41%"}
+
+
+register(
+    MessageKind("core.alert", "Alert", "posted by every service when something needs attention (CPU, offline, stalled, …); "
+                "edited in place when it resolves", where="the alert channel", where_env="ALERT_CHANNEL_ID",
+                sample=_sample_alert, group="alerts",
+                variables={"alert_title": "the alert's title without the severity dot", "severity": "ok · info · warning · critical",
+                           "fingerprint": "what makes this alert unique", "extra": "the alert's own fields as a map"}),
+    MessageKind("core.alert_resolved", "Alert resolved", "how an alert message looks once its cause is gone",
+                where="the alert channel (edited in place)", where_env="ALERT_CHANNEL_ID", sample=_sample_resolved, group="alerts",
+                variables={"alert_title": "the alert's title", "note": "the resolution note, if any", "severity": "always ok"}),
+)

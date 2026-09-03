@@ -14,6 +14,7 @@ from typing import Mapping
 from periscope import Store, load_dotenv_if_present, setup_logging
 from periscope.runtime import Runtime
 
+from . import messages  # noqa: F401  — importing messages registers the plexrequests.* message kinds
 from .service import SERVICES
 
 SERVICE = SERVICES[0]

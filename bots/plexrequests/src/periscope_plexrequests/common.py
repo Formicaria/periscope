@@ -1,4 +1,5 @@
-"""Pure helpers shared by the cogs: input parsing, rate limiting, embed builders, channel lookup."""
+"""Pure helpers shared by the cogs: input parsing, rate limiting, embed builders, channel lookup, and the message
+kinds every post is customised under (Messages page)."""
 
 from __future__ import annotations
 
@@ -7,10 +8,21 @@ import time
 from typing import Any
 
 import discord
+from periscope.messages import embed_ctx, render_template
 
 from .config import PlexRequestsSettings
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+# message kinds: the keys the send sites customise their posts under (registered in messages.py)
+INVITE_KIND = "plexrequests.invite"             # the sticky Get Plex Access embed
+REQUEST_KIND = "plexrequests.request"           # the sticky Search & Request embed
+BOARD_KIND = "plexrequests.board"               # the live status board
+REQUEST_CARD_KIND = "plexrequests.request_card"  # the card announcing a sent request
+AVAILABLE_KIND = "plexrequests.available"       # that card once the title is on Plex
+NEW_ON_PLEX_KIND = "plexrequests.new_on_plex"   # the new-on-Plex feed card
+STATS_KIND = "plexrequests.stats"               # the /requests plexstats report
+MYSTATUS_KIND = "plexrequests.mystatus"         # the /requests mystatus list
 
 # Seerr-style media status codes, also produced for Radarr/Sonarr lookups
 STATUS_UNKNOWN, STATUS_PENDING, STATUS_PROCESSING, STATUS_PARTIAL, STATUS_AVAILABLE = 1, 2, 3, 4, 5
@@ -124,43 +136,96 @@ def result_key(r: dict[str, Any], i: int) -> str:
     return f"{r['media_type']}:{r['tmdb_id']}:{i}"
 
 
+def via_label(pick: dict[str, Any]) -> str:
+    """Which app took the request: Seerr, else Radarr for movies and Sonarr for shows."""
+    if pick.get("backend") == "seerr":
+        return "Seerr"
+    return "Radarr" if pick["media_type"] == "movie" else "Sonarr"
+
+
+def media_ctx(pick: dict[str, Any]) -> dict[str, Any]:
+    """A search pick as plain template variables (the media-card kinds add who asked for it)."""
+    return {
+        "name": str(pick["title"]), "year": pick.get("year") or "", "label": title_label(pick, bold=False),
+        "media_type": pick["media_type"], "overview": pick.get("overview") or "", "poster": pick.get("poster") or "",
+        "tmdb_id": pick.get("tmdb_id") or 0, "backend": pick.get("backend") or "seerr", "via": via_label(pick),
+    }
+
+
+# ----- the sticky button embeds ------------------------------------------------------------------------
+# Their wording is a message template (Messages page) rather than code, so it can be edited without a release.
+# `build_invite_embed` / `build_request_embed` render the defaults; the cogs post whatever `bot.messages.render`
+# gives them, which is the same thing until someone customises it.
+
+INVITE_TEMPLATE: dict[str, Any] = {
+    "title": "🎬  {{ plex_name }} — get access",
+    "description": (
+        "Movies, TV shows and music, streamed from {{ plex_name }}.\n\n"
+        "**Three ways to get your invite:**\n"
+        "🎟️ Click **Get Plex Access** below and enter your Plex email\n"
+        "⌨️ Just type your email in this channel (I'll delete it right away)\n"
+        "🔍 Use `/plexinvite email:you@example.com`\n\n"
+        "You'll get an email from Plex — hit **Accept**, then watch at "
+        "[app.plex.tv](https://app.plex.tv) or any Plex app.\n"
+        "Don't have a Plex account? Create one first at "
+        "[plex.tv/sign-up](https://www.plex.tv/sign-up/) with the same email."
+    ),
+    "color": PLEX_GOLD,
+    "footer": "Invites are sent automatically • You'll get the {{ role_name }} role",
+    "timestamp": False,
+}
+
+REQUEST_TEMPLATE: dict[str, Any] = {
+    "title": "🍿  Request movies & TV shows",
+    "description": (
+        "Want something added to Plex? Ask here and it goes straight into the download queue.\n\n"
+        "**Three ways to request:**\n"
+        "🔎 Click **Search & Request** below\n"
+        "⌨️ Just type the title in this channel (e.g. `Dune Part Two`) — I'll tidy your message away\n"
+        "🎯 Use `/requests request title:...`\n\n"
+        "Searching and picking happens privately — nothing shows up here until your request is actually sent.\n"
+        "📈 `/requests mystatus` shows your requests and pings you when they're ready."
+    ),
+    "color": BLURPLE,
+    "footer": "{% if requests_role_name %}Requires the {{ requests_role_name }} role — get it in "
+              "#{{ channel_name }}{% endif %}",
+    "timestamp": False,
+}
+
+STICKY_TEMPLATES = {INVITE_KIND: INVITE_TEMPLATE, REQUEST_KIND: REQUEST_TEMPLATE}
+
+
+def sticky_ctx(cfg: PlexRequestsSettings) -> dict[str, Any]:
+    """The settings the sticky templates can mention, as plain variables."""
+    return {"plex_name": cfg.plex_name, "role_name": cfg.role_name, "requests_role_name": cfg.requests_role_name,
+            "channel_name": cfg.channel_name, "invite_channel": cfg.invite_channel_where(), "plex_link": cfg.plex_link}
+
+
+def render_sticky(template: dict[str, Any], cfg: PlexRequestsSettings) -> discord.Embed:
+    """A sticky's default wording: its template over the settings (no embed parts to inherit, so those are empty)."""
+    embed = render_template(template, {**embed_ctx(None), **sticky_ctx(cfg)})
+    assert embed is not None   # the defaults always carry a title
+    return embed
+
+
 def build_invite_embed(cfg: PlexRequestsSettings) -> discord.Embed:
-    e = discord.Embed(
-        title=f"🎬  {cfg.plex_name} — get access",
-        colour=discord.Colour.from_str(PLEX_GOLD),
-        description=(
-            f"Movies, TV shows and music, streamed from {cfg.plex_name}.\n\n"
-            "**Three ways to get your invite:**\n"
-            "🎟️ Click **Get Plex Access** below and enter your Plex email\n"
-            "⌨️ Just type your email in this channel (I'll delete it right away)\n"
-            "🔍 Use `/plexinvite email:you@example.com`\n\n"
-            "You'll get an email from Plex — hit **Accept**, then watch at "
-            "[app.plex.tv](https://app.plex.tv) or any Plex app.\n"
-            "Don't have a Plex account? Create one first at "
-            "[plex.tv/sign-up](https://www.plex.tv/sign-up/) with the same email."
-        ),
-    )
-    e.set_footer(text=f"Invites are sent automatically • You'll get the {cfg.role_name} role")
-    return e
+    return render_sticky(INVITE_TEMPLATE, cfg)
 
 
 def build_request_embed(cfg: PlexRequestsSettings) -> discord.Embed:
-    e = discord.Embed(
-        title="🍿  Request movies & TV shows",
-        colour=discord.Colour.from_str(BLURPLE),
-        description=(
-            "Want something added to Plex? Ask here and it goes straight into the download queue.\n\n"
-            "**Three ways to request:**\n"
-            "🔎 Click **Search & Request** below\n"
-            "⌨️ Just type the title in this channel (e.g. `Dune Part Two`) — I'll tidy your message away\n"
-            "🎯 Use `/requests request title:...`\n\n"
-            "Searching and picking happens privately — nothing shows up here until your request is actually sent.\n"
-            "📈 `/requests mystatus` shows your requests and pings you when they're ready."
-        ),
-    )
-    if cfg.requests_role_name:
-        e.set_footer(text=f"Requires the {cfg.requests_role_name} role — get it in #{cfg.channel_name}")
-    return e
+    return render_sticky(REQUEST_TEMPLATE, cfg)
+
+
+def sticky_embed(bot: Any, kind: str, cfg: PlexRequestsSettings) -> discord.Embed | None:
+    """The sticky as it should read now: the user's template when there is one, else the default. None when the
+    kind is switched off on the Messages page — then nothing is posted and an existing copy is left alone."""
+    messages = getattr(bot, "messages", None)
+    if messages is None:
+        return render_sticky(STICKY_TEMPLATES[kind], cfg)
+    if not messages.enabled(kind):
+        return None
+    # `render` also answers None when the kind is not registered (a cog loaded on its own): post the default then
+    return messages.render(kind, sticky_ctx(cfg)) or render_sticky(STICKY_TEMPLATES[kind], cfg)
 
 
 # ----- discord lookups -------------------------------------------------------------------------------

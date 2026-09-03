@@ -58,6 +58,11 @@ class BoardHost:
     def user(self):
         return getattr(self.hub.bot, "user", None)   # the board finds its own earlier messages by author
 
+    @property
+    def messages(self):
+        # the owner's customisations (Messages page): the board applies its `media.board` template on render
+        return getattr(self.hub.bot, "messages", None)
+
     async def get_channel_safe(self, channel_id: int):
         return await self.hub.bot.get_channel_safe(channel_id)
 

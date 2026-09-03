@@ -34,6 +34,9 @@ def service_card(request: Request, name: str, status: dict[str, Any] | None = No
     live = status.get("services", {}).get(name)
     presence = store.presence_for(name)
     pinfo = store.presences.get(presence) or {}
+    server = store.server_for(name)
+    # the server is only worth a word on the card when there is more than one to choose from
+    server_label = (str(store.servers[server].get("name") or "").strip() or server) if len(store.servers) > 1 else ""
     problem: str | None = None
     fix: str | None = None
     if spec is None:
@@ -63,6 +66,7 @@ def service_card(request: Request, name: str, status: dict[str, Any] | None = No
         "group": spec.group if spec else "infra", "slash": spec.slash if spec else "", "installed": spec is not None,
         "state": state, "enabled": enabled, "presence": presence, "presence_user": presence_user,
         "presence_label": pinfo.get("label") or presence, "presence_has_token": bool(pinfo.get("token")),
+        "server": server, "server_label": server_label,
         "has_check": bool(spec and spec.check), "needs_webhook": bool(spec and spec.needs_webhook),
         "webhook_paths": list(spec.webhook_paths) if spec else [],
         "problem": problem, "fix_href": link[0] if link else None, "fix_label": link[1] if link else None,

@@ -12,7 +12,8 @@ import discord
 from periscope import Alert, LabBot, Severity
 
 from .config import GithubSettings
-from .render import ci_transition, is_bot_sender, one_liner, render, repo_name
+from .messages import feed_kind
+from .render import ci_transition, event_ctx, is_bot_sender, one_liner, render, render_event, repo_name
 
 log = logging.getLogger(__name__)
 
@@ -96,11 +97,16 @@ class Dispatcher:
             log.debug("event %s from bot sender ignored", event)
             return False
 
-        embed = render(event, payload, self.bot.lab_name, verbose=self.cfg.verbose)
+        kind, embed = render_event(event, payload, self.bot.lab_name, verbose=self.cfg.verbose)
         if event == "workflow_run":
             await self._handle_ci(payload)
         if embed is None:
             log.debug("event %s/%s produced no embed (%s)", event, payload.get("action"), source)
+            return False
+        # the user's template for this kind of card (Messages page); None = they switched it off
+        post = self.bot.messages.apply(feed_kind(kind), embed, event_ctx(kind, event, payload))
+        if post is None:
+            log.debug("event %s/%s not posted: %s is switched off", event, payload.get("action"), feed_kind(kind))
             return False
 
         self.bump(event)
@@ -115,7 +121,7 @@ class Dispatcher:
             if ch is None:
                 continue
             try:
-                await ch.send(embed=embed)
+                await ch.send(embed=post)
                 posted = True
             except discord.HTTPException as e:
                 log.error("failed to post %s to channel %s: %s", event, channel_id, e)

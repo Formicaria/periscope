@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Messages{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-center gap-3 mb-4">
+  <p class="text-sm opacity-70 max-w-3xl">Everything the bots post, shown the way Discord draws it. Open one to reword it,
+    change its colour or add a field — your version applies to the next post, no restart. Switch one off and the bot stays quiet about it.</p>
+</div>
+<div class="flex flex-wrap items-center gap-3 mb-6">
+  <input id="msg-search" type="search" class="input input-bordered input-sm w-72" placeholder="search {{ total }} messages: name, service, wording"
+         autocomplete="off" aria-label="search messages">
+  <span id="msg-empty" class="text-sm opacity-60 hidden">nothing matches that.</span>
+</div>
+
+<div id="msg-gallery" class="space-y-10">
+  {% for item in items %}
+  <section data-section>
+    <h2 class="text-xs uppercase tracking-widest opacity-60 mb-3">{{ item.title }}</h2>
+    {% for group in item.groups %}
+    <div data-group class="mb-6">
+      {% if item.groups | length > 1 or group.name != 'general' %}
+      <h3 class="text-[11px] uppercase tracking-widest opacity-40 mb-2">{{ group.name }}</h3>
+      {% endif %}
+      <div class="grid gap-4 lg:grid-cols-2">
+        {% for card in group.cards %}
+        {% include "partials/message_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</div>
+{% if not items %}
+<div class="text-sm opacity-60">No service package that registers messages is installed — run <code class="mono">periscope update</code> on the box.</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var box = document.getElementById('msg-search'), gallery = document.getElementById('msg-gallery');
+    var empty = document.getElementById('msg-empty');
+    if (!box || !gallery) return;
+    function apply() {
+      var q = box.value.trim().toLowerCase(), hits = 0;
+      gallery.querySelectorAll('[data-search]').forEach(function (card) {
+        var show = !q || card.dataset.search.indexOf(q) !== -1;
+        card.classList.toggle('hidden', !show);
+        if (show) hits++;
+      });
+      gallery.querySelectorAll('[data-group], [data-section]').forEach(function (box) {
+        box.classList.toggle('hidden', !box.querySelector('[data-search]:not(.hidden)'));
+      });
+      empty.classList.toggle('hidden', hits !== 0);
+    }
+    box.addEventListener('input', apply);
+    document.body.addEventListener('htmx:afterSwap', apply);
+  })();
+</script>
+{% endblock %}

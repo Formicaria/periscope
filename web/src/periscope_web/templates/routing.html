@@ -10,7 +10,7 @@
         <h3 class="text-xs uppercase tracking-widest opacity-60">Alert routing per service</h3>
         <label class="ml-auto flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" class="toggle toggle-xs" onchange="document.getElementById('alert-table').classList.toggle('show-off', this.checked)"> show services that are off</label>
       </div>
-      <p class="text-xs opacity-70">Where each service posts alerts and its status board, and which role it pings on CRITICAL. Empty = the lab default from the <a href="/discord" class="link">Discord page</a>. Changes save immediately and apply on the next restart.</p>
+      <p class="text-xs opacity-70">Where each service posts alerts and its status board, and which role it pings on CRITICAL. Empty = the default of the server that service posts in, from the <a href="/discord" class="link">Discord page</a>. The channels offered are that server's own. Changes save immediately and apply on the next restart.</p>
       <style>#alert-table:not(.show-off) tr.svc-off { display: none; }</style>
       <div class="overflow-x-auto" id="alert-table">
         <table class="table table-sm">

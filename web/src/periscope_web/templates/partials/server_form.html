@@ -1,0 +1,90 @@
+<form id="server-{{ server.key }}" class="card bg-base-200 shadow-sm" method="post" action="/discord/servers/{{ server.key }}"
+      hx-post="/discord/servers/{{ server.key }}" hx-target="#server-{{ server.key }}" hx-swap="outerHTML">
+  <div class="card-body p-4 gap-3">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="flex flex-wrap items-center gap-2">
+      <h3 class="text-xs uppercase tracking-widest opacity-60">{{ server.label }}</h3>
+      <span class="mono text-[10px] opacity-40">{{ server.key }}</span>
+      {% if server.is_default %}
+      <span class="badge badge-primary badge-xs" title="new services post here, and this is the server the sign-in gate checks">default</span>
+      {% else %}
+      <button type="button" class="btn btn-ghost btn-xs" hx-post="/discord/servers/{{ server.key }}/default"
+              hx-target="#servers" hx-swap="outerHTML" title="new services post here from now on">make default</button>
+      {% endif %}
+      <div class="ml-auto flex items-center gap-2">
+        {% if server.services %}<span class="text-[10px] opacity-50">{{ server.services | join(', ') }}</span>{% endif %}
+        {% if server.can_remove %}
+        <button type="button" class="btn btn-ghost btn-xs text-error" hx-post="/discord/servers/{{ server.key }}/delete"
+                hx-target="#servers" hx-swap="outerHTML"
+                hx-confirm="Remove {{ server.label }}?{% if server.services %} {{ server.services | join(', ') }} move to the default server.{% endif %}">remove</button>
+        {% endif %}
+      </div>
+    </div>
+    {% if server.unknown %}
+    {% if server.no_token %}
+    <p class="text-xs opacity-70">No bot has a token yet, so this server's channels cannot be listed — paste the ids by hand, or add a token on the <a href="/presences" class="link">Bots</a> page.</p>
+    {% else %}
+    <p class="text-xs opacity-70">The bot is not in this server, so its channels cannot be listed — paste the ids by hand, or
+      {% if server.invite %}<a href="{{ server.invite }}" target="_blank" rel="noopener" class="link link-primary">invite the bot</a> and reload.{% else %}invite the bot (link on the <a href="/presences" class="link">Bots</a> page) and reload.{% endif %}</p>
+    {% endif %}
+    {% endif %}
+    <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Server name</span><span class="label-text-alt mono opacity-40 text-[10px]">LAB_NAME</span></label>
+        <input name="name" value="{{ server.name }}" class="input input-bordered input-sm" placeholder="shown in every embed footer">
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Accent color</span><span class="label-text-alt mono opacity-40 text-[10px]">LAB_COLOR</span></label>
+        <div class="join">
+          <span class="join-item inline-block w-9 border border-base-300 rounded-l-btn" style="background:#{{ server.color }}"></span>
+          <input name="color" value="{{ server.color }}" class="input input-bordered input-sm join-item mono w-full" pattern="[0-9a-fA-F]{6}" placeholder="5865F2">
+        </div>
+      </div>
+      <div class="form-control md:col-span-2">
+        <label class="label py-1"><span class="label-text text-sm">Discord server id</span><span class="label-text-alt mono opacity-40 text-[10px]">GUILD_ID</span></label>
+        <input name="guild_id" value="{{ server.guild_id }}" class="input input-bordered input-sm mono" placeholder="Developer Mode → right-click the server → Copy Server ID">
+      </div>
+      {% for key, label, env in (('status_channel_id', 'Status board channel', 'STATUS_CHANNEL_ID'), ('alert_channel_id', 'Alert channel', 'ALERT_CHANNEL_ID')) %}
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">{{ label }}</span><span class="label-text-alt mono opacity-40 text-[10px]">{{ env }}</span></label>
+        {% if server.channels %}
+        <select name="{{ key }}" class="select select-bordered select-sm">
+          <option value="">—</option>
+          {% if server[key] and server[key] not in server.channels | map(attribute='id') | list %}<option value="{{ server[key] }}" selected>{{ server[key] }} (not found)</option>{% endif %}
+          {% for c in server.channels %}<option value="{{ c.id }}" {% if c.id == server[key] %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+        </select>
+        {% else %}
+        <input name="{{ key }}" value="{{ server[key] }}" class="input input-bordered input-sm mono" placeholder="channel id">
+        {% endif %}
+      </div>
+      {% endfor %}
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Role pinged on CRITICAL</span><span class="label-text-alt mono opacity-40 text-[10px]">ALERT_ROLE_ID</span></label>
+        {% if server.roles %}
+        <select name="alert_role_id" class="select select-bordered select-sm">
+          <option value="">—</option>
+          {% if server.alert_role_id and server.alert_role_id not in server.roles | map(attribute='id') | list %}<option value="{{ server.alert_role_id }}" selected>{{ server.alert_role_id }} (not found)</option>{% endif %}
+          {% for r in server.roles %}<option value="{{ r.id }}" {% if r.id == server.alert_role_id %}selected{% endif %}>{{ r.label }}</option>{% endfor %}
+        </select>
+        {% else %}
+        <input name="alert_role_id" value="{{ server.alert_role_id }}" class="input input-bordered input-sm mono" placeholder="role id">
+        {% endif %}
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Admin roles</span><span class="label-text-alt mono opacity-40 text-[10px]">ADMIN_ROLE_IDS</span></label>
+        {% if server.roles %}
+        <select name="admin_role_ids" multiple class="select select-bordered select-sm h-24">
+          {% for r in server.roles %}<option value="{{ r.id }}" {% if r.id in server.admin_ids %}selected{% endif %}>{{ r.label }}</option>{% endfor %}
+        </select>
+        <span class="label-text-alt opacity-60 text-xs mt-1">who may run mutating commands here; empty = server administrators</span>
+        {% else %}
+        <input name="admin_role_ids" value="{{ server.admin_ids | join(',') }}" class="input input-bordered input-sm mono" placeholder="role ids, comma-separated">
+        {% endif %}
+      </div>
+    </div>
+    <div class="card-actions items-center gap-3 mt-2">
+      <button class="btn btn-primary btn-sm">Save</button>
+      <span class="text-xs opacity-60">applies on the next restart</span>
+    </div>
+  </div>
+</form>

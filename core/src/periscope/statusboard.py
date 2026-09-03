@@ -69,12 +69,21 @@ def _first_title(embeds: list[discord.Embed] | None) -> str | None:
 
 
 class StatusBoard:
-    def __init__(self, bot: "LabBot", key: str, channel_id: int | None = None):
+    def __init__(self, bot: "LabBot", key: str, channel_id: int | None = None, kind: str | None = None):
         self.bot = bot
         self.key = key
         self.channel_id = channel_id or bot.settings.status_channel_id
         self._state = bot.state.namespace(f"board:{key}")
         self._scanned = False  # the adoption scan runs once per process, on the first render
+        # the message kind this board is customised under (Messages page): "<service>.board" by default
+        self.kind = kind or (f"{getattr(bot, 'name', '')}.board" if getattr(bot, "name", "") else "")
+
+    def customise(self, embed: discord.Embed | None, ctx: dict | None = None) -> discord.Embed | None:
+        """The user's template for this board, if any (None = the board is switched off)."""
+        messages = getattr(self.bot, "messages", None)
+        if embed is None or messages is None or not self.kind:
+            return embed
+        return messages.apply(self.kind, embed, ctx)
 
     # ----- lookup ------------------------------------------------------------------------------------
     async def _fetch(self) -> tuple[Any, discord.Message | None]:
@@ -153,11 +162,21 @@ class StatusBoard:
 
     # ----- render ------------------------------------------------------------------------------------
     async def render(self, embed: discord.Embed | None = None, *, embeds: list[discord.Embed] | None = None,
-                     view: discord.ui.View | None = None, pin: bool = True) -> discord.Message | None:
+                     view: discord.ui.View | None = None, pin: bool = True, ctx: dict | None = None) -> discord.Message | None:
         ch, msg = await self._fetch()
         if ch is None:
             log.warning("StatusBoard[%s]: no channel configured", self.key)
             return None
+        if embed is not None and embeds is None:
+            embed = self.customise(embed, ctx)
+            if embed is None:                       # switched off on the Messages page: take the board down
+                if msg is not None:
+                    try:
+                        await msg.delete()
+                    except discord.HTTPException:
+                        pass
+                    self._state.pop("message_id")
+                return None
         all_embeds = list(embeds) if embeds is not None else ([embed] if embed is not None else [])
         if all_embeds:
             stamp(all_embeds[0], self.key)

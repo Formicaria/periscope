@@ -10,7 +10,7 @@ from typing import Any
 import discord
 from discord.ext import commands, tasks
 
-from ..common import AVAILABLE_COLOUR, resolve_channel
+from ..common import AVAILABLE_COLOUR, NEW_ON_PLEX_KIND, resolve_channel
 from ..context import PlexRequests
 
 log = logging.getLogger(__name__)
@@ -28,6 +28,21 @@ def fresh_items(items: list[dict[str, Any]], seen: list[str]) -> list[dict[str, 
     seen_set = set(seen)
     fresh = [i for i in items if i["key"] not in seen_set]
     return list(reversed(fresh[:MAX_PER_PASS]))
+
+
+def new_on_plex_embed(it: dict[str, Any], plex_name: str) -> discord.Embed:
+    """The feed card for one recently added item (movie, episode, season, …)."""
+    emoji = "🎬" if it["kind"] == "movie" else "📺"
+    e = discord.Embed(title=f"🆕 {emoji}  {new_label(it)}", description=it["summary"] or None,
+                      colour=discord.Colour.from_str(AVAILABLE_COLOUR))
+    e.set_footer(text=f"Now on {plex_name}")
+    return e
+
+
+def new_on_plex_ctx(it: dict[str, Any], plex_name: str) -> dict[str, Any]:
+    """What a plexrequests.new_on_plex template can use besides the card's own parts."""
+    return {"name": str(it["title"]), "year": it.get("year") or "", "kind": it.get("kind") or "",
+            "label": new_label(it), "plex_name": plex_name}
 
 
 class NewOnPlexCog(commands.Cog):
@@ -60,10 +75,10 @@ class NewOnPlexCog(commands.Cog):
             log.info("new-on-plex: baselined %d items", len(keys))
             return
         for it in fresh_items(items, seen):
-            emoji = "🎬" if it["kind"] == "movie" else "📺"
-            e = discord.Embed(title=f"🆕 {emoji}  {new_label(it)}", description=it["summary"] or None,
-                              colour=discord.Colour.from_str(AVAILABLE_COLOUR))
-            e.set_footer(text=f"Now on {self.cfg.plex_name}")
+            e = self.bot.messages.apply(NEW_ON_PLEX_KIND, new_on_plex_embed(it, self.cfg.plex_name),
+                                        new_on_plex_ctx(it, self.cfg.plex_name))
+            if e is None:                      # switched off: the item still counts as seen, nothing is posted
+                continue
             try:
                 await channel.send(embed=e)
                 self.ctx.stats.bump("new_on_plex")

@@ -1,8 +1,8 @@
 """Sign-in model.
 
 * Session = signed cookie (itsdangerous, `web.session_secret`), 14 days, httponly, SameSite=Lax.
-* Discord OAuth2 (`identify guilds.members.read`): allowed when the member's roles in `lab.guild_id` include any of
-  `web.allowed_role_ids` (default: `lab.admin_role_ids`); when both are empty, the guild owner (GET /guilds/{id}
+* Discord OAuth2 (`identify guilds.members.read`): allowed when the member's roles in the default server include any of
+  `web.allowed_role_ids` (default: the default server's `admin_role_ids`); when both are empty, the guild owner (GET /guilds/{id}
   with any presence's bot token) is allowed.
 * Bootstrap: while `web.oauth_client_id` is empty, the one-time setup token logged at startup signs in a
   "bootstrap admin" and stores the OAuth application details.
@@ -121,21 +121,21 @@ class Sessions:
 def allowed_role_ids(store) -> list[str]:
     ids = [str(x).strip() for x in (store.web.get("allowed_role_ids") or []) if str(x).strip()]
     if not ids:
-        ids = [str(x).strip() for x in (store.lab.get("admin_role_ids") or []) if str(x).strip()]
+        ids = [str(x).strip() for x in (store.server().get("admin_role_ids") or []) if str(x).strip()]
     return ids
 
 
 async def is_allowed(app_state, user_id: str, member_roles: list[str]) -> tuple[bool, str]:
     """Role gate, or guild-owner gate when no role is configured. Returns (allowed, reason)."""
     store = app_state.runtime.store
-    guild_id = str(store.lab.get("guild_id") or "").strip()
+    guild_id = str(store.server().get("guild_id") or "").strip()
     if not guild_id:
-        return False, "no Discord server is configured yet (lab.guild_id) — sign in with the setup token first"
+        return False, "no Discord server is configured yet — sign in with the setup token first, then set one on the Discord page"
     wanted = allowed_role_ids(store)
     if wanted:
         if any(r in wanted for r in member_roles):
             return True, ""
-        return False, "you are not holding one of the allowed roles in the lab server"
+        return False, "you are not holding one of the allowed roles in that server"
     token = next((str(p.get("token") or "") for p in store.presences.values() if p.get("token")), "")
     if not token:
         return False, "no allowed roles configured and no presence token to look up the server owner"

@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..forms import build_fields, parse_form
 from ..render import fix_link, flash, is_htmx, partial, redirect, render
 from . import save
+from .servers import server_options
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -24,7 +25,8 @@ async def _ctx(request: Request, name: str, *, errors: list[str] | None = None) 
         raise HTTPException(404, f"unknown service {name}")
     svc = store.services.get(name) or {"enabled": False, "presence": store.default_presence(), "env": {}}
     env = {str(k): ("" if v is None else str(v)) for k, v in (svc.get("env") or {}).items()}
-    channels, roles = await st.guild.channels(), await st.guild.roles()
+    server = store.server_for(name)                 # the pickers show the server this service posts in
+    channels, roles = await st.guild.channels(server), await st.guild.roles(server)
     live = runtime.status().get("services", {}).get(name) or {}
     enabled = bool(svc.get("enabled"))
     state = live.get("state") if enabled else "off"
@@ -36,7 +38,8 @@ async def _ctx(request: Request, name: str, *, errors: list[str] | None = None) 
         "fix": fix_link(live.get("fix"), name) if enabled else None,
         "presence": store.presence_for(name),
         "presences": [(k, v.get("label") or k, bool(v.get("token"))) for k, v in store.presences.items()],
-        "groups": build_fields(spec, env, channels=channels, roles=roles, store=store),
+        "server": server, "servers": server_options(store),
+        "groups": build_fields(spec, env, channels=channels, roles=roles, store=store, server=server),
         "pickers": bool(channels), "errors": errors or [], "live": live,
         "webhook": {"port": store.webhook.get("port"), "paths": spec.webhook_paths, "needs": spec.needs_webhook},
     }
@@ -63,6 +66,9 @@ async def service_save(request: Request, name: str):
     presence = str(form.get("_presence") or svc.get("presence") or store.default_presence())
     if presence not in store.presences:
         errors.append(f"unknown bot {presence!r}")
+    server = str(form.get("_server") or svc.get("server") or store.server_for(name))
+    if server not in store.servers:
+        errors.append(f"unknown server {server!r}")
     if errors:
         for e in errors:
             flash(request, e, "error")
@@ -72,6 +78,7 @@ async def service_save(request: Request, name: str):
         return render(request, "service.html", ctx, status=422)
     store.update_service_env(name, values)
     svc["presence"] = presence
+    svc["server"] = server
     svc["enabled"] = enabled
     save(request)
     missing = spec.required_missing(store.env_for(name))
