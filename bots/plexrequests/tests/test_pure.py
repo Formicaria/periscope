@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import discord
 import pytest
 from periscope import JsonState, env_scope
 
@@ -321,3 +322,71 @@ def test_spec_settings_match_example_and_store_from_env(tmp_path):
     assert svc["enabled"] and svc["env"] == {"PLEX_URL": "http://p", "PLEX_TOKEN": "t", "CHANNEL_ID": "1", "PLEXREQ_GUILD_ID": "77"}
     env = store.env_for("plexrequests")
     assert env["DISCORD_TOKEN"] == "tok" and env["LAB_NAME"] == "lab1" and env["PLEXREQ_GUILD_ID"] == "77"
+
+
+# ----- sticky embeds never duplicate -----------------------------------------------------------------------------
+class _Msg:
+    _ids = 500
+
+    def __init__(self, channel, embed, author):
+        _Msg._ids += 1
+        self.id, self.channel, self.embeds, self.author = _Msg._ids, channel, [embed], author
+        self.edits, self.deleted = [], False
+
+    async def edit(self, **kw):
+        self.edits.append(kw)
+
+    async def delete(self):
+        self.deleted = True
+        self.channel.messages.pop(self.id, None)
+
+
+class _Channel:
+    name = "join-plex"
+
+    def __init__(self):
+        self.messages, self.sent = {}, []
+
+    def add(self, embed, author):
+        m = _Msg(self, embed, author)
+        self.messages[m.id] = m
+        return m
+
+    async def send(self, *, embed=None, view=None):
+        m = self.add(embed, ME)
+        self.sent.append(m)
+        return m
+
+    async def fetch_message(self, mid):
+        if mid in self.messages:
+            return self.messages[mid]
+        raise discord.NotFound(SimpleNamespace(status=404, reason="nf"), {"message": "Unknown Message", "code": 10008})
+
+    async def history(self, limit=100):
+        for m in sorted(self.messages.values(), key=lambda m: m.id, reverse=True):
+            yield m
+
+
+ME = SimpleNamespace(id=42)
+
+
+@pytest.mark.asyncio
+async def test_sticky_ensure_adopts_and_deletes_strays(tmp_path):
+    from periscope_plexrequests.records import Records
+    from periscope_plexrequests.sticky import Sticky
+
+    rec = Records(JsonState(tmp_path / "s.json"))
+    st = Sticky(rec, me=lambda: ME)
+    ch = _Channel()
+    title = "🎬  get access"
+    older = ch.add(discord.Embed(title=title), ME)
+    newer = ch.add(discord.Embed(title=title), ME)
+    someone = ch.add(discord.Embed(title=title), SimpleNamespace(id=7))          # not the bot's → untouched
+    other = ch.add(discord.Embed(title="🍿  Request movies & TV shows"), ME)   # a different sticky → untouched
+    await st.ensure(ch, "invite_message_id", discord.Embed(title=title), view=None)
+    assert not ch.sent and rec.message_id("invite_message_id") == newer.id and newer.edits
+    assert older.deleted and not someone.deleted and not other.deleted
+    # the remembered one is gone and no copy exists → post once
+    ch.messages.pop(newer.id)
+    await st.ensure(ch, "invite_message_id", discord.Embed(title=title), view=None)
+    assert len(ch.sent) == 1 and rec.message_id("invite_message_id") == ch.sent[0].id

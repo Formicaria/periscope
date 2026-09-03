@@ -54,6 +54,10 @@ class BoardHost:
     def settings(self):
         return self.hub.bot.settings
 
+    @property
+    def user(self):
+        return getattr(self.hub.bot, "user", None)   # the board finds its own earlier messages by author
+
     async def get_channel_safe(self, channel_id: int):
         return await self.hub.bot.get_channel_safe(channel_id)
 

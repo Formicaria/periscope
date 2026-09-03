@@ -1,5 +1,6 @@
 """Live status board in STATUS_CHANNEL: who is streaming what, Radarr/Sonarr queues with ETAs, disk space.
-One embed, edited in place every minute."""
+One embed, edited in place every minute — the core StatusBoard keeps it a single message (it adopts the
+standalone bot's old board and deletes stray copies instead of posting again)."""
 
 from __future__ import annotations
 
@@ -9,13 +10,15 @@ from typing import Any
 
 import discord
 from discord.ext import commands, tasks
+from periscope.statusboard import StatusBoard
 
 from ..common import PLEX_GOLD, fmt_bytes, resolve_channel
 from ..context import PlexRequests
 
 log = logging.getLogger(__name__)
 
-STATUS_MESSAGE_KEY = "status_message_id"
+STATUS_MESSAGE_KEY = "status_message_id"   # the standalone bot's key, kept in sync for /requests plexstats etc.
+BOARD_KEY = "plex-requests"
 INTERVAL_S = 60
 
 
@@ -24,7 +27,10 @@ class BoardCog(commands.Cog):
         self.bot = bot
         self.ctx: PlexRequests = bot.plexreq
         self.cfg = self.ctx.cfg
-        self._msg: discord.Message | None = None
+        self.board = StatusBoard(bot, key=BOARD_KEY, channel_id=0)   # channel resolved on every tick (name or id)
+        legacy = self.ctx.records.message_id(STATUS_MESSAGE_KEY)
+        if legacy and not self.board._state.get("message_id"):
+            self.board._state.set("message_id", legacy)               # the standalone bot's board carries on
 
     async def cog_load(self) -> None:
         if self.cfg.status_channel:
@@ -84,26 +90,17 @@ class BoardCog(commands.Cog):
         except Exception:  # noqa: BLE001
             log.exception("status board build failed")
             return
-        if self._msg is not None:
-            try:
-                await self._msg.edit(embed=embed)
-                return
-            except discord.HTTPException:
-                self._msg = None
-        mid = self.ctx.records.message_id(STATUS_MESSAGE_KEY)
-        if mid:
-            try:
-                self._msg = await channel.fetch_message(mid)
-                await self._msg.edit(embed=embed)
-                return
-            except discord.HTTPException:
-                self._msg = None
+        self.board.channel_id = channel.id
         try:
-            self._msg = await channel.send(embed=embed)
+            msg = await self.board.render(embed, pin=False)
         except discord.Forbidden:
             log.error("cannot post the status board in #%s", getattr(channel, "name", channel))
             return
-        self.ctx.records.set_message_id(STATUS_MESSAGE_KEY, self._msg.id)
+        except discord.HTTPException as e:
+            log.warning("status board update failed: %s", e)
+            return
+        if msg is not None and self.ctx.records.message_id(STATUS_MESSAGE_KEY) != msg.id:
+            self.ctx.records.set_message_id(STATUS_MESSAGE_KEY, msg.id)
 
     @status_board.before_loop
     async def _wait_ready(self) -> None:

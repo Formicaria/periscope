@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "periscope"
-version = "2.0.1"
+version = "2.0.2"
 description = "periscope core: bot base, embeds, alert routing, status boards, views, webhooks for the periscope Discord bot pack."
 readme = "README.md"
 license = { text = "MIT" }

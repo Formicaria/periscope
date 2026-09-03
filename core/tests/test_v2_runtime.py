@@ -47,8 +47,15 @@ def test_store_roundtrip_and_env(tmp_path):
 
 def test_migrate_v1(tmp_path):
     write_v1(tmp_path)
+    (tmp_path / "bots" / "proxmox" / "data").mkdir()
+    (tmp_path / "bots" / "proxmox" / "data" / "state.json").write_text(json.dumps({"board:pve:message_id": 5551, "alerts:fp1": {"message_id": 7}}))
+    (tmp_path / "bots" / "arr" / "data").mkdir()
+    (tmp_path / "bots" / "arr" / "data" / "state.json").write_text(json.dumps({"board:arr:message_id": 5552, "alerts:x": {}}))
     s = Store(tmp_path / "config" / "periscope.yaml")
     created = migrate_v1(s, tmp_path)
+    carried = json.loads((tmp_path / "data" / "state.json").read_text())
+    assert carried["svc:proxmox:board:pve:message_id"] == 5551 and carried["svc:proxmox:alerts:fp1"] == {"message_id": 7}
+    assert carried["presence:arr:board:arr:message_id"] == 5552 and "presence:arr:alerts:x" not in carried
     assert "proxmox" in created and "sonarr" in created and "radarr" in created and "qbittorrent" in created and "plex" in created
     assert "lidarr" not in created and s.services["lidarr"]["enabled"] is False   # present but off
     assert "unifi" not in s.services                                               # no token → not imported

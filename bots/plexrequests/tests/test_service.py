@@ -739,12 +739,14 @@ async def test_status_board_posts_then_edits(tmp_path, fakes):
     fields = {f.name: f.value for f in e.fields}
     assert fields["🎞️ Now streaming — 1"] == "**alice** — Heat (42%)"
     assert fields["🎬 Radarr queue — 2"] == "Heat — 5m" and fields["📺 Sonarr queue — 0"] == "Empty"
-    assert fields["💾 Disk"] == "`/data` — 500.0 GiB free of 2.0 TiB" and e.footer.text == "lab.example Plex • refreshes every 60s"
+    assert fields["💾 Disk"] == "`/data` — 500.0 GiB free of 2.0 TiB"
+    assert e.footer.text == "lab.example Plex • refreshes every 60s · plex-requests board"   # the board marker
     assert sb.plexreq.records.message_id("status_message_id") == msg.id
     await board.status_board.coro(board)
     assert len(world.status.sent) == 1 and msg.edits                    # edited in place
     # a restart finds the remembered message instead of posting a new one
-    board._msg = None
+    from periscope.statusboard import StatusBoard
+    board.board = StatusBoard(sb, key="plex-requests", channel_id=0)
     await board.status_board.coro(board)
     assert len(world.status.sent) == 1 and len(msg.edits) == 2
     # Plex down → the board says so instead of failing

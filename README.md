@@ -47,6 +47,11 @@ shared bot; any service can be pointed at its own application in the UI (**Bots*
 The Overview says in plain words what state every service is in — `running`, `starting`, `needs setup`, `error`, `off` —
 and lists what needs attention with a link to the page that fixes it. `periscope list` prints the same.
 
+Status boards are one message each, for good: a board remembers its message and edits it in place; after a
+restart, an upgrade or a lost state file it finds its earlier message in the channel (pins, then recent history)
+and reuses it, deleting any stray copies, and only posts when there is nothing to reuse. Every board carries a
+`· <name> board` footer so it recognises itself.
+
 ### Coming from v1 (one unit per bot)
 
 `periscope update` does it: the runtime imports every `bots/*/.env` (and `/opt/displexia/.env` if that bot ran on

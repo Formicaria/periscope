@@ -51,7 +51,7 @@ class PlexRequests:
         self.backend = backend
         self.records = Records(bot.state)
         self.stats = Stats(bot.state)
-        self.sticky = Sticky(self.records)
+        self.sticky = Sticky(self.records, me=lambda: getattr(bot, "user", None))
         self.invite_cd: dict[int, list[float]] = {}
         self.request_cd: dict[int, list[float]] = {}
         self.group = app_commands.Group(name="requests", description="Plex media requests")

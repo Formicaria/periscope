@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .state import JsonState
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -78,6 +79,35 @@ def _service_env(env: dict[str, str], prefixes: tuple[str, ...], shared: tuple[s
     return out
 
 
+def migrate_state(root: Path, bot: str, env: dict[str, str], presence: str) -> int:
+    """Carry a v1 bot's runtime state (the pinned board's message id, open alerts) into the v2 state file so the
+    boards are edited in place instead of posted again. Returns the number of keys copied."""
+    src = Path(env.get("DATA_DIR") or "data")
+    if not src.is_absolute():
+        src = root / "bots" / bot / src
+    old = JsonState(src / "state.json")
+    if not old._data:
+        return 0
+    new = JsonState(root / "data" / "state.json")
+    copied = 0
+    for key, value in old._data.items():
+        if bot == "arr":
+            # the media board is shared by every media service of the presence; per-app alerts do not map
+            if key.startswith("board:"):
+                target = f"presence:{presence}:{key}"
+            else:
+                continue
+        else:
+            target = f"svc:{bot}:{key}"
+        if new.get(target) is None:
+            new._data[target] = value
+            copied += 1
+    if copied:
+        new.save()
+        log.info("carried %d state entries of the v1 %s bot over (boards keep their messages)", copied, bot)
+    return copied
+
+
 def migrate_v1(store: Store, root: Path) -> list[str]:
     """Populate `store` from v1 files under `root`. Returns the list of services created."""
     created: list[str] = []
@@ -104,6 +134,10 @@ def migrate_v1(store: Store, root: Path) -> list[str]:
     # one presence per v1 bot so nothing changes in Discord
     for bot, env in envs.items():
         store.presences[bot] = {"token": env["DISCORD_TOKEN"], "label": bot}
+        try:
+            migrate_state(root, bot, env, presence=bot)
+        except Exception:  # noqa: BLE001 - state is a convenience; config must still migrate
+            log.warning("could not carry the v1 %s bot's state over", bot, exc_info=True)
         for svc, prefixes in SPLIT.get(bot, [(bot, ("*",))]):
             svc_env = _service_env(env, prefixes, SPLIT_SHARED.get(bot, ()), store)
             # a split child with no keys of its own (e.g. LIDARR_URL empty) stays disabled but present
