@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" data-theme="dim">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · periscope</title>
+  <script>(function(){try{var t=localStorage.getItem('periscope-theme');if(t){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();</script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4/dist/full.min.css" rel="stylesheet" type="text/css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}</style>
+</head>
+<body class="min-h-screen bg-base-100 text-base-content flex items-center justify-center p-4">
+<div class="w-full max-w-lg space-y-4">
+  <div class="flex items-center gap-2 justify-center mb-2">
+    <span class="inline-block h-7 w-7 rounded-full bg-primary ring-4 ring-primary/20"></span>
+    <span class="text-2xl font-bold tracking-tight">periscope</span>
+  </div>
+  {% for level, message in flashes %}
+  <div class="alert {{ 'alert-error' if level == 'error' else 'alert-info' }} text-sm py-2">{{ message }}</div>
+  {% endfor %}
+  {% if error %}<div class="alert alert-error text-sm py-2">{{ error }}</div>{% endif %}
+  {% if denied %}
+  <div class="alert alert-warning text-sm py-2"><span>Signed in with Discord, but {{ denied }}.</span></div>
+  {% endif %}
+
+  {% if oauth %}
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body p-6 gap-4 items-center text-center">
+      <p class="text-sm opacity-70">Sign in with the Discord account that holds an admin role in <b>{{ lab.name }}</b>.</p>
+      <a href="/auth/discord?next={{ next | urlencode }}" class="btn btn-primary">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.2.4a18.3 18.3 0 0 1 4.4 2.3 15.4 15.4 0 0 0-15.2 0A18.3 18.3 0 0 1 8.8 3.4L8.6 3a19.8 19.8 0 0 0-4.9 1.4C.6 9.1-.2 13.6.2 18.1a19.9 19.9 0 0 0 6 3l1.3-2a12.8 12.8 0 0 1-2-1l.5-.4a14.2 14.2 0 0 0 12 0l.5.4a12.8 12.8 0 0 1-2 1l1.3 2a19.9 19.9 0 0 0 6-3c.5-5.2-.8-9.7-3.5-13.7ZM8.5 15.4c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4Zm7 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4Z"/></svg>
+        Sign in with Discord
+      </a>
+    </div>
+  </div>
+  {% if token_available %}
+  <details class="collapse collapse-arrow bg-base-200 text-sm">
+    <summary class="collapse-title text-sm opacity-70">Locked out? Use the setup token from the runtime log</summary>
+    <div class="collapse-content">
+      <form method="post" action="/auth/bootstrap" class="space-y-2">
+        <input type="hidden" name="next" value="{{ next }}">
+        <input type="password" name="token" class="input input-bordered input-sm w-full mono" placeholder="web UI setup token: …" autocomplete="off" required>
+        <button class="btn btn-sm">Sign in as bootstrap admin</button>
+      </form>
+    </div>
+  </details>
+  {% endif %}
+
+  {% else %}
+  <div class="card bg-base-200 shadow-sm">
+    <form method="post" action="/auth/bootstrap" class="card-body p-6 gap-4" autocomplete="off">
+      <h2 class="text-lg font-semibold">First run — set up sign-in</h2>
+      <ol class="text-sm opacity-80 list-decimal list-inside space-y-1">
+        <li>Open the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener" class="link">Discord developer portal</a> → your application (any periscope bot works) → <b>OAuth2</b>.</li>
+        <li>Add this redirect URL: <span class="mono select-all break-all">{{ redirect_uri }}</span></li>
+        <li>Copy the <b>Client ID</b> and a <b>Client Secret</b> below.</li>
+        <li>Paste the setup token printed in the runtime log (<span class="mono">web UI setup token: …</span>; <span class="mono">periscope logs</span>).</li>
+      </ol>
+      <input type="hidden" name="next" value="{{ next }}">
+      <label class="form-control">
+        <span class="label-text text-sm pb-1">Setup token <span class="text-error">*</span></span>
+        <input type="password" name="token" class="input input-bordered input-sm mono" required autocomplete="off" {% if not token_available %}placeholder="already used — restart the runtime for a new one"{% endif %}>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-sm pb-1">Public base URL</span>
+        <input name="base_url" value="{{ base_url }}" class="input input-bordered input-sm mono" placeholder="{{ redirect_uri | replace('/auth/callback', '') }}">
+      </label>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="form-control">
+          <span class="label-text text-sm pb-1">OAuth2 client id</span>
+          <input name="client_id" value="{{ client_id }}" class="input input-bordered input-sm mono" placeholder="application id">
+        </label>
+        <label class="form-control">
+          <span class="label-text text-sm pb-1">OAuth2 client secret</span>
+          <input type="password" name="client_secret" class="input input-bordered input-sm mono" placeholder="{{ '•••• set' if secret_set else '' }}" autocomplete="new-password">
+        </label>
+      </div>
+      <p class="text-xs opacity-60">Client id and secret are optional right now: with only the token you are signed in as bootstrap admin and can add them later on the Discord page. Allowed Discord users = members holding an admin role of the lab (configurable there too).</p>
+      <button class="btn btn-primary btn-sm">Save and sign in</button>
+    </form>
+  </div>
+  {% endif %}
+  <p class="text-center text-xs opacity-40">periscope v{{ version }}</p>
+</div>
+</body>
+</html>

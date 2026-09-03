@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<form method="get" action="/logs" class="flex flex-wrap items-center gap-2 mb-3">
+  <input name="q" value="{{ q }}" class="input input-bordered input-sm mono w-64" placeholder="filter (substring: service name, [presence], text)">
+  <select name="level" class="select select-bordered select-sm">
+    <option value="">all levels</option>
+    {% for lv in levels %}<option value="{{ lv }}" {% if lv == level %}selected{% endif %}>{{ lv }}+</option>{% endfor %}
+  </select>
+  <button class="btn btn-sm">Filter</button>
+  <a href="/logs/download?q={{ q | urlencode }}&level={{ level }}" class="btn btn-ghost btn-sm">Download</a>
+  <label class="label cursor-pointer gap-2 ml-auto"><input type="checkbox" id="follow" class="toggle toggle-sm" checked><span class="label-text text-xs">follow</span></label>
+  <span id="live-dot" class="badge badge-xs badge-warning" title="stream state"></span>
+</form>
+<div class="flex flex-wrap gap-1 mb-3">
+  <a href="/logs" class="badge badge-sm {{ 'badge-primary' if not q else 'badge-ghost' }}">all</a>
+  {% for chip in chips %}
+  <a href="/logs?q={{ chip.q | urlencode }}&level={{ level }}" class="badge badge-sm {{ 'badge-primary' if q == chip.q else 'badge-ghost' }} mono">{{ chip.label }}</a>
+  {% endfor %}
+</div>
+<div id="log" class="mono text-xs bg-base-200 rounded-box p-3 h-[70vh] overflow-y-auto leading-relaxed" data-since="{{ since }}" data-q="{{ q }}" data-level="{{ level }}">
+  {% for line in lines %}<div class="log-line log-{{ line.level }}">{{ line.text }}</div>{% endfor %}
+  {% if not lines %}<div class="opacity-50">no lines yet{% if q %} matching "{{ q }}"{% endif %}</div>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var box = document.getElementById('log'), dot = document.getElementById('live-dot'), follow = document.getElementById('follow');
+    var since = box.dataset.since, q = box.dataset.q, level = box.dataset.level, max = 2000;
+    box.scrollTop = box.scrollHeight;
+    var url = '/logs/stream?since=' + encodeURIComponent(since) + '&q=' + encodeURIComponent(q) + '&level=' + encodeURIComponent(level);
+    var es = new EventSource(url);
+    es.onopen = function () { dot.className = 'badge badge-xs badge-success'; };
+    es.onerror = function () { dot.className = 'badge badge-xs badge-error'; };
+    es.addEventListener('log', function (e) {
+      var text = e.data, m = /^\S+ \S+ (\w+)/.exec(text), lv = m ? m[1] : '';
+      var d = document.createElement('div'); d.className = 'log-line log-' + lv; d.textContent = text;
+      box.appendChild(d);
+      while (box.children.length > max) box.removeChild(box.firstChild);
+      if (follow.checked) box.scrollTop = box.scrollHeight;
+    });
+    window.addEventListener('beforeunload', function () { es.close(); });
+  })();
+</script>
+{% endblock %}

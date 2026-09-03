@@ -9,7 +9,7 @@ from typing import Any
 from periscope import Alert, HttpClient, Severity
 from periscope.http import HttpError
 
-from .config import ARR_API_VERSION, ArrSettings
+from .config import ARR_API_VERSION, ARR_APPS, ArrSettings
 
 log = logging.getLogger(__name__)
 
@@ -157,19 +157,60 @@ class JellyfinClient(HttpClient):
         return await self.get_json("System/Info") or {}
 
 
+def build_client(name: str, cfg: ArrSettings) -> HttpClient | None:
+    """The client for one media service, or None when its URL is not set in `cfg`."""
+    v = cfg.verify_ssl
+    if name in ARR_APPS:
+        pair = cfg.arr.get(name)
+        return ArrClient(name, pair[0], pair[1], verify_ssl=v) if pair else None
+    if name == "qbittorrent":
+        return QbitClient(cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, api_key=cfg.qbit_api_key, verify_ssl=v) if cfg.qbit_url else None
+    if name == "sabnzbd":
+        return SabClient(cfg.sabnzbd_url, cfg.sabnzbd_api_key, verify_ssl=v) if cfg.sabnzbd_url else None
+    if name == "plex":
+        return PlexClient(cfg.plex_url, cfg.plex_token, verify_ssl=v) if cfg.plex_url else None
+    if name == "jellyfin":
+        return JellyfinClient(cfg.jellyfin_url, cfg.jellyfin_api_key, verify_ssl=v) if cfg.jellyfin_url else None
+    raise ValueError(f"unknown media service {name!r}")
+
+
 class Services:
-    """All configured clients, built once from settings and shared by every cog."""
+    """Every configured client, shared by every cog. v1 builds them all from settings at once; v2 services
+    `add()` theirs one by one as they are built."""
 
     def __init__(self, cfg: ArrSettings):
         self.cfg = cfg
-        v = cfg.verify_ssl
-        self.arr: dict[str, ArrClient] = {app: ArrClient(app, url, key, verify_ssl=v) for app, (url, key) in cfg.arr.items()}
-        self.qbit = QbitClient(cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, api_key=cfg.qbit_api_key, verify_ssl=v) if cfg.qbit_url else None
-        self.sab = SabClient(cfg.sabnzbd_url, cfg.sabnzbd_api_key, verify_ssl=v) if cfg.sabnzbd_url else None
-        self.plex = PlexClient(cfg.plex_url, cfg.plex_token, verify_ssl=v) if cfg.plex_url else None
-        self.jellyfin = JellyfinClient(cfg.jellyfin_url, cfg.jellyfin_api_key, verify_ssl=v) if cfg.jellyfin_url else None
+        self.arr: dict[str, ArrClient] = {}
+        self.qbit: QbitClient | None = None
+        self.sab: SabClient | None = None
+        self.plex: PlexClient | None = None
+        self.jellyfin: JellyfinClient | None = None
         self._fails: dict[str, int] = {}
         self._down: set[str] = set()
+        for name in cfg.enabled_services():
+            self.add(name, build_client(name, cfg))
+
+    def add(self, name: str, client: HttpClient) -> None:
+        if name in ARR_APPS:
+            self.arr[name] = client  # type: ignore[assignment]
+        elif name == "qbittorrent":
+            self.qbit = client  # type: ignore[assignment]
+        elif name == "sabnzbd":
+            self.sab = client  # type: ignore[assignment]
+        elif name == "plex":
+            self.plex = client  # type: ignore[assignment]
+        elif name == "jellyfin":
+            self.jellyfin = client  # type: ignore[assignment]
+        else:
+            raise ValueError(f"unknown media service {name!r}")
+
+    def get(self, name: str) -> HttpClient | None:
+        if name in ARR_APPS:
+            return self.arr.get(name)
+        return {"qbittorrent": self.qbit, "sabnzbd": self.sab, "plex": self.plex, "jellyfin": self.jellyfin}.get(name)
+
+    def names(self) -> list[str]:
+        return [n for n in (*ARR_APPS, "qbittorrent", "sabnzbd", "plex", "jellyfin") if self.get(n) is not None]
 
     def all_clients(self) -> list[HttpClient]:
         return [*self.arr.values(), *[c for c in (self.qbit, self.sab, self.plex, self.jellyfin) if c]]
@@ -197,15 +238,18 @@ class Services:
 
 
 async def note_reachability(bot, name: str, ok: bool, error: str = "") -> None:
-    """Call after every poll of `name`; fires/resolves the CRITICAL '<service> unreachable' alert."""
-    svc: Services = bot.svc
-    transition = svc.record(name, ok)
+    """Call after every poll of `name`; fires/resolves the CRITICAL '<service> unreachable' alert.
+
+    `bot` is any bot carrying the media hub; the alert goes out through the service that owns `name`.
+    """
+    hub = bot.media_hub
+    transition = hub.svc.record(name, ok)
     fp = f"arr:{name}:unreachable"
     if transition == "down":
         log.error("%s unreachable after 3 consecutive failures: %s", name, error)
-        await bot.alerts.fire(Alert(fingerprint=fp, title=f"{name} unreachable",
-                                    description=f"3 consecutive API failures.\n`{error[:300]}`",
-                                    severity=Severity.CRITICAL))
+        await hub.alerts_for(name).fire(Alert(fingerprint=fp, title=f"{name} unreachable",
+                                              description=f"3 consecutive API failures.\n`{error[:300]}`",
+                                              severity=Severity.CRITICAL))
     elif transition == "up":
         log.info("%s reachable again", name)
-        await bot.alerts.resolve(fp, note="API responding again")
+        await hub.alerts_for(name).resolve(fp, note="API responding again")

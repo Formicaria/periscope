@@ -9,44 +9,37 @@ echo "==> Installing system packages"
 apt-get update -qq
 apt-get install -y -qq python3 python3-venv git >/dev/null
 
-echo "==> Virtualenv + dependencies (core + every bot; enabling is per bot)"
+echo "==> Virtualenv + dependencies (core, every service, web UI)"
 [ -d venv ] || python3 -m venv venv
 ./venv/bin/pip install --quiet --upgrade pip
-./venv/bin/pip install --quiet -e core
+./venv/bin/pip install --quiet -e core -e web
 for b in bots/*/; do ./venv/bin/pip install --quiet -e "$b"; done
+mkdir -p config data
 
 echo "==> Installing the periscope CLI (/usr/local/bin/periscope)"
 sed "s|__DIR__|$DIR|g" periscope.cli > /usr/local/bin/periscope
 chmod +x /usr/local/bin/periscope
 
-echo "==> Installing systemd template unit (periscope@<bot>)"
-sed "s|__DIR__|$DIR|g" periscope@.service > /etc/systemd/system/periscope@.service
-systemctl daemon-reload
-
-# Enable every bot that has a configured .env; restart the ones already running.
-enabled=0
-for d in bots/*/; do
-    b="$(basename "$d")"
-    if [ -f "$d/.env" ] && grep -Eq '^DISCORD_TOKEN=.+' "$d/.env"; then
-        chmod 600 "$d/.env"; mkdir -p "$d/data"
-        systemctl enable --now "periscope@$b" >/dev/null 2>&1
-        systemctl restart "periscope@$b"
-        echo "    ● $b enabled"
-        enabled=$((enabled+1))
-    fi
+echo "==> Installing systemd service (periscope)"
+# retire v1 per-bot units if this box ran them
+for u in $(systemctl list-unit-files --no-legend 'periscope@*' 2>/dev/null | awk '{print $1}'); do
+    systemctl disable --now "$u" >/dev/null 2>&1 || true
 done
-
-echo
-if [ "$enabled" -eq 0 ]; then
-    cat <<MSG
-No bots enabled yet. For each one you want:
-    periscope init <bot>          # creates bots/<bot>/.env from the example
-    nano $DIR/bots/<bot>/.env     # DISCORD_TOKEN + service credentials
-    periscope enable <bot>
-
-Available: $(ls bots | tr '\n' ' ')
-MSG
-else
-    sleep 2; periscope status
-    echo; echo "Done. Logs: periscope logs <bot>    Update: periscope update"
+rm -f /etc/systemd/system/periscope@.service
+# the standalone Plex bot is now the plexrequests service — stop the old unit so it doesn't double-post
+if [ -f /etc/systemd/system/displexia.service ]; then
+    systemctl disable --now displexia >/dev/null 2>&1 || true
+    echo "    retired the standalone Plex bot unit (its config was imported as the plexrequests service)"
 fi
+sed "s|__DIR__|$DIR|g" periscope.service > /etc/systemd/system/periscope.service
+systemctl daemon-reload
+systemctl enable periscope >/dev/null
+systemctl restart periscope
+
+sleep 4
+periscope status || true
+echo
+echo "Done."
+periscope web
+echo "  Sign in with the setup token:  journalctl -u periscope | grep 'setup token' | tail -1"
+echo "  Logs: periscope logs    Update: periscope update"

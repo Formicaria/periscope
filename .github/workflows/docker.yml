@@ -9,9 +9,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        bot: [proxmox, prometheus, arr, unifi, github]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -24,7 +21,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/periscope-${{ matrix.bot }}
+          images: ghcr.io/${{ github.repository_owner }}/periscope
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
@@ -32,7 +29,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: bots/${{ matrix.bot }}/Dockerfile
+          file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

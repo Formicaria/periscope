@@ -116,15 +116,8 @@ Without it, `/prom panel` replies with a clear "renderer missing" error; everyth
 
 From the periscope checkout (see the [pack README](../../README.md) for install):
 
-```bash
-periscope init prometheus
-nano bots/prometheus/.env       # tokens/ids/urls
-periscope enable prometheus
-periscope logs prometheus       # look for "ready as ..." and "webhook server listening"
-curl localhost:8081/health      # {"ok": true} once connected to Discord
-```
-
-Docker instead: `docker compose up -d prometheus` from the repo root uses the same `bots/prometheus/.env`. If Prometheus/Alertmanager/Grafana run in another compose project, put the bot on the same Docker network or use LAN addresses in the URLs.
+Open the web UI (`periscope web`) → **prometheus** → fill in the values from the steps above → **Test** → **Save** → enable. From a terminal: `periscope config prometheus KEY=VALUE …` then `periscope enable prometheus`; `periscope check prometheus` runs the same test.
+ If Prometheus/Alertmanager/Grafana run in another compose project, put the bot on the same Docker network or use LAN addresses in the URLs.
 
 ### 4. Point Alertmanager at the bot
 

@@ -1,0 +1,54 @@
+<form id="repo-map" class="card bg-base-200 shadow-sm" method="post" action="/routing" hx-post="/routing" hx-target="#repo-map" hx-swap="outerHTML">
+  <div class="card-body p-4 gap-3">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="flex items-center gap-2">
+      <h3 class="text-xs uppercase tracking-widest opacity-60">GitHub repo → channel map</h3>
+      {% if not github_installed %}<span class="badge badge-warning badge-sm">github service not installed</span>{% endif %}
+    </div>
+    <p class="text-xs opacity-70">Every event of a matching repo (incl. CI trains) goes to that channel. Patterns are exact names or globs (<span class="mono">formicaria*</span>). Stored as <span class="mono">GITHUB_REPO_CHANNEL_MAP</span> on the github service.</p>
+    <div class="overflow-x-auto">
+      <table class="table table-sm" id="repo-rows">
+        <thead><tr><th>repo pattern</th><th>channel</th><th class="w-10"></th></tr></thead>
+        <tbody>
+          {% for repo, cid in rows %}
+          {% include "partials/repo_row.html" %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <button type="button" class="btn btn-ghost btn-xs" hx-get="/routing/row" hx-target="#repo-rows tbody" hx-swap="beforeend">+ add rule</button>
+    </div>
+    <div class="grid gap-x-6 gap-y-3 md:grid-cols-3 mt-2">
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Catch-all feed channel</span><span class="label-text-alt mono opacity-40 text-[10px]">GITHUB_FEED_CHANNEL_ID</span></label>
+        {% if channels %}
+        <select name="GITHUB_FEED_CHANNEL_ID" class="select select-bordered select-sm">
+          <option value="">— (unmapped repos are dropped)</option>
+          {% for c in channels %}<option value="{{ c.id }}" {% if c.id == feed %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+        </select>
+        {% else %}<input name="GITHUB_FEED_CHANNEL_ID" value="{{ feed }}" class="input input-bordered input-sm mono" placeholder="channel id">{% endif %}
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Catch-all CI channel</span><span class="label-text-alt mono opacity-40 text-[10px]">GITHUB_CI_CHANNEL_ID</span></label>
+        {% if channels %}
+        <select name="GITHUB_CI_CHANNEL_ID" class="select select-bordered select-sm">
+          <option value="">— (falls back to the feed channel)</option>
+          {% for c in channels %}<option value="{{ c.id }}" {% if c.id == ci %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+        </select>
+        {% else %}<input name="GITHUB_CI_CHANNEL_ID" value="{{ ci }}" class="input input-bordered input-sm mono" placeholder="channel id">{% endif %}
+      </div>
+      <div class="form-control justify-end">
+        <label class="label cursor-pointer justify-start gap-3 py-1">
+          <input type="checkbox" name="GITHUB_MIRROR_TO_FEED" value="true" class="toggle toggle-sm" {% if mirror %}checked{% endif %}>
+          <span class="label-text text-sm">Mirror mapped repos to the catch-all too</span>
+        </label>
+        <span class="label-text-alt mono opacity-40 text-[10px] pl-1">GITHUB_MIRROR_TO_FEED</span>
+      </div>
+    </div>
+    <div class="card-actions items-center gap-3 mt-2">
+      <button class="btn btn-primary btn-sm">Save routing</button>
+      <span class="text-xs opacity-60">restart to apply</span>
+    </div>
+  </div>
+</form>

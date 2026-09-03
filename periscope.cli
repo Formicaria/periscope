@@ -1,71 +1,42 @@
 #!/bin/bash
 # periscope CLI — installed to /usr/local/bin/periscope by setup.sh
 DIR="__DIR__"
-BOTS="$(ls "$DIR/bots")"
-
-need_bot() { [ -n "$1" ] || { echo "usage: periscope $CMD <bot>   (bots: $(echo $BOTS))"; exit 1; }
-             [ -d "$DIR/bots/$1" ] || { echo "unknown bot '$1' (bots: $(echo $BOTS))"; exit 1; }; }
+PY="$DIR/venv/bin/python"
 CMD="$1"; shift
 
+svc() { exec "$PY" -m periscope.cli "$DIR" "$CMD" "$@"; }
+
 case "$CMD" in
-    list)
-        for b in $BOTS; do
-            st="$(systemctl is-active "periscope@$b" 2>/dev/null)"
-            en="$(systemctl is-enabled "periscope@$b" 2>/dev/null)"
-            cfg="no .env"; [ -f "$DIR/bots/$b/.env" ] && cfg=".env"
-            printf '  %-12s %-9s %-9s %s\n' "$b" "$st" "$en" "$cfg"
-        done ;;
-    init)
-        need_bot "$1"
-        if [ "$2" = "--manual" ]; then
-            [ -f "$DIR/bots/$1/.env" ] && { echo "bots/$1/.env already exists"; exit 0; }
-            cp "$DIR/bots/$1/.env.example" "$DIR/bots/$1/.env" && chmod 600 "$DIR/bots/$1/.env"
-            echo "created $DIR/bots/$1/.env — fill it in, then: periscope enable $1"
-        else
-            exec "$DIR/venv/bin/python" -m periscope.wizard "$DIR" "$1"
-        fi ;;
-    enable)
-        [ -n "$1" ] || need_bot ""
-        for b in "$@"; do
-            need_bot "$b"
-            [ -f "$DIR/bots/$b/.env" ] || { echo "$b: no .env — run: periscope init $b"; continue; }
-            grep -Eq '^DISCORD_TOKEN=.+' "$DIR/bots/$b/.env" || { echo "$b: DISCORD_TOKEN empty in bots/$b/.env"; continue; }
-            chmod 600 "$DIR/bots/$b/.env"; mkdir -p "$DIR/bots/$b/data"
-            systemctl enable --now "periscope@$b" && echo "$b enabled."
-        done ;;
-    disable)
-        [ -n "$1" ] || need_bot ""
-        for b in "$@"; do need_bot "$b"; systemctl disable --now "periscope@$b" && echo "$b disabled."; done ;;
+    list|status|enable|disable|check|config|presence|web|init) svc "$@" ;;
+    layout)  exec "$PY" "$DIR/scripts/git_layout.py" "$@" ;;
     update)  exec bash "$DIR/update.sh" ;;
-    logs)    if [ -n "$1" ]; then need_bot "$1"; exec journalctl -u "periscope@$1" -f; else exec journalctl -u 'periscope@*' -f; fi ;;
-    status)  if [ -n "$1" ]; then need_bot "$1"; exec systemctl --no-pager status "periscope@$1"; else
-             for b in $BOTS; do printf '  %-12s %s\n' "$b" "$(systemctl is-active "periscope@$b" 2>/dev/null)"; done; fi ;;
-    restart) if [ -n "$1" ]; then for b in "$@"; do need_bot "$b"; systemctl restart "periscope@$b" && echo "$b restarted."; done; else
-             for b in $BOTS; do systemctl is-active -q "periscope@$b" >/dev/null 2>&1 && systemctl restart "periscope@$b" && echo "$b restarted."; done; fi ;;
-    config)  need_bot "$1"
-             grep -Ev '^\s*(#|$)' "$DIR/bots/$1/.env" | sed -E 's/^([A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD|PASS)[A-Z0-9_]*=).+/\1********/' ;;
+    logs)    if [ -n "$1" ]; then exec journalctl -u periscope -f -o cat | grep --line-buffered -i -E "\[$1\]|periscope_$1|$1"; else exec journalctl -u periscope -f; fi ;;
+    restart) systemctl restart periscope && echo "periscope restarted." ;;
+    start)   systemctl start periscope && echo "periscope started." ;;
+    stop)    systemctl stop periscope && echo "periscope stopped." ;;
     *)
-        "$DIR/venv/bin/python" - <<'PY'
+        "$PY" - <<'PY'
 from periscope.banner import BANNER, __version__
 print(BANNER)
-print(f"  periscope v{__version__} — homelab monitoring bots for Discord, pick what you run")
+print(f"  periscope v{__version__} — one service, every integration, a web UI")
 PY
         cat <<USAGE
 
-  usage: periscope <command> [bot]
+  usage: periscope <command> [args]
 
-    list              every bot with active/enabled/.env state
-    init <bot>        guided setup: verifies each credential, creates channels/roles, writes .env, starts the bot
-                      (add --manual to just copy the example .env and edit it yourself)
-    enable <bot...>   start the bot now and on boot (needs a filled .env)
-    disable <bot...>  stop it and remove it from boot
-    status [bot]      service status
-    logs [bot]        follow the live logs (all bots when omitted)
-    restart [bot...]  restart one bot, or all running ones
-    config <bot>      show the active .env with secrets masked
-    update            git pull, reinstall, restart every enabled bot
-
-  bots: $(echo $BOTS)
+    web                     where the admin UI is (configure everything there)
+    list                    every service: enabled · state · presence
+    enable <svc...>         turn a service on (config must be complete; restart applies)
+    disable <svc...>
+    check <svc>             test a service's credentials right now
+    config <svc>            show a service's settings, secrets masked
+    presence [add|token]    manage Discord identities (tokens)
+    init                    first-run: paste a bot token, pick the server, create channels — or use the web UI
+    layout                  apply the #git-* / #op-* channel convention (see --help)
+    status                  runtime status (presences, services, errors)
+    logs [svc]              follow the runtime log, optionally one service
+    restart | start | stop  the periscope service
+    update                  git pull, reinstall, restart
 
 USAGE
         ;;

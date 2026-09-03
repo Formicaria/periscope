@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Discord{% endblock %}
+{% block content %}
+<div class="grid gap-6 xl:grid-cols-2">
+  <div class="space-y-6">
+    {% include "partials/lab_form.html" %}
+    {% include "partials/web_form.html" %}
+  </div>
+  <div>
+    <div id="layout-panel">{% include "partials/layout.html" %}</div>
+  </div>
+</div>
+{% endblock %}

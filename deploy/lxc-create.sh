@@ -55,11 +55,10 @@ pct exec "$CTID" -- bash -c "git clone -q -b $BRANCH https://github.com/formicar
 CT_IP="$(pct exec "$CTID" -- hostname -I | awk '{print $1}')"
 cat <<EOM
 
-✔ periscope installed in CT $CTID ($CT_IP) at /opt/periscope — no bots enabled yet.
+✔ periscope installed in CT $CTID ($CT_IP) at /opt/periscope — running, nothing enabled yet.
 
 Next:
-  pct enter $CTID
-  periscope init proxmox && nano /opt/periscope/bots/proxmox/.env    # repeat per bot you want
-  periscope enable proxmox
-  periscope list | logs <bot> | update
+  periscope web                  # open the admin UI (port 8090) — sign in with the setup token:
+  journalctl -u periscope | grep 'setup token' | tail -1
+  paste a bot token, pick the server, create the channel layout, enable the services you run.
 EOM

@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bot: [core, proxmox, prometheus, arr, unifi, github]
+        bot: [core, proxmox, prometheus, arr, unifi, github, plexrequests, web]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,9 +17,9 @@ jobs:
           python-version: "3.12"
       - run: pip install -e core pytest pytest-asyncio
       - if: matrix.bot != 'core'
-        run: pip install -e bots/${{ matrix.bot }}
-      - run: python -m compileall -q core/src ${{ matrix.bot != 'core' && format('bots/{0}/src', matrix.bot) || '' }}
-      - run: pytest -q ${{ matrix.bot == 'core' && 'core' || format('bots/{0}', matrix.bot) }}
+        run: pip install -e ${{ matrix.bot == 'web' && 'web' || format('bots/{0}', matrix.bot) }}
+      - run: python -m compileall -q core/src ${{ matrix.bot == 'web' && 'web/src' || matrix.bot != 'core' && format('bots/{0}/src', matrix.bot) || '' }}
+      - run: pytest -q ${{ matrix.bot == 'core' && 'core' || matrix.bot == 'web' && 'web' || format('bots/{0}', matrix.bot) }}
   scripts:
     runs-on: ubuntu-latest
     steps:

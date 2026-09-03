@@ -1,22 +1,29 @@
 #!/bin/bash
-# Pull the latest periscope from git, reinstall, refresh CLI + unit, restart enabled bots.
+# Pull the latest periscope from git, reinstall, refresh CLI + unit, restart.
 set -e
 cd "$(dirname "$0")"
 DIR="$(pwd)"
 echo "==> git pull"
 git pull --ff-only
 echo "==> deps"
-./venv/bin/pip install --quiet -e core
+./venv/bin/pip install --quiet -e core -e web
 for b in bots/*/; do ./venv/bin/pip install --quiet -e "$b"; done
 echo "==> refresh CLI + unit"
 sed "s|__DIR__|$DIR|g" periscope.cli > /usr/local/bin/periscope && chmod +x /usr/local/bin/periscope
-sed "s|__DIR__|$DIR|g" periscope@.service > /etc/systemd/system/periscope@.service
-systemctl daemon-reload
-echo "==> restart enabled bots"
-for d in bots/*/; do
-    b="$(basename "$d")"
-    systemctl is-enabled -q "periscope@$b" 2>/dev/null && systemctl restart "periscope@$b" && echo "    ↻ periscope@$b"
+for u in $(systemctl list-unit-files --no-legend 'periscope@*' 2>/dev/null | awk '{print $1}'); do
+    systemctl disable --now "$u" >/dev/null 2>&1 || true
 done
-sleep 2
-/usr/local/bin/periscope status
-echo "Updated. Logs: periscope logs <bot>"
+rm -f /etc/systemd/system/periscope@.service
+# the standalone Plex bot is now the plexrequests service — stop the old unit so it doesn't double-post
+if [ -f /etc/systemd/system/displexia.service ]; then
+    systemctl disable --now displexia >/dev/null 2>&1 || true
+    echo "    retired the standalone Plex bot unit (its config was imported as the plexrequests service)"
+fi
+sed "s|__DIR__|$DIR|g" periscope.service > /etc/systemd/system/periscope.service
+systemctl daemon-reload
+systemctl enable periscope >/dev/null
+echo "==> restart"
+systemctl restart periscope
+sleep 4
+periscope status || true
+echo "Updated. Logs: periscope logs    UI: periscope web"

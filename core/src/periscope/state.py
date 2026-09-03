@@ -57,3 +57,6 @@ class NamespacedState:
 
     def pop(self, key: str, default: Any = None) -> Any:
         return self._p.pop(self._prefix + key, default)
+
+    def namespace(self, prefix: str) -> "NamespacedState":
+        return NamespacedState(self._p, self._prefix + prefix)

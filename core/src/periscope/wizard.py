@@ -289,9 +289,13 @@ def step_layout(d: Discord, env: dict, shared: dict, bot: str) -> None:
                 env[var] = ask(f"{var} (role id for {target}, blank to skip)", required=False)
         else:
             c = chans.get(target)
+            optional = var in ("GITHUB_FEED_CHANNEL_ID", "GITHUB_CI_CHANNEL_ID")
             if c:
                 env[var] = c["id"]
                 ok(f"{var} ← #{c['name']}")
+            elif optional:
+                env[var] = ask(f"{var} (catch-all channel id, blank = per-project channels only via `periscope layout`)",
+                               required=False)
             else:
                 env[var] = ask(f"{var} (channel id for #{target})")
     for k in ("STATUS_CHANNEL_ID", "ALERT_CHANNEL_ID", "ALERT_ROLE_ID", "ADMIN_ROLE_IDS"):

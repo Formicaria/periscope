@@ -1,4 +1,8 @@
-"""/arr queue|remove|calendar|search|health|clients + the stalled-download watcher."""
+"""/arr queue|remove|calendar|search|health|clients + the stalled-download watcher.
+
+Under v2 the same methods back the per-app groups (`/sonarr queue`, `/qbittorrent status`, …) built by the
+media hub, with the app fixed.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,8 @@ from . import register
 log = logging.getLogger(__name__)
 
 QueueApp = Literal["sonarr", "radarr", "lidarr"]
+HealthApp = Literal["sonarr", "radarr", "lidarr", "prowlarr"]
+DownloadClient = Literal["qbittorrent", "sabnzbd"]
 STATUS_ICON = {"downloading": "⬇️", "completed": "📦", "queued": "🕒", "paused": "⏸️", "warning": "⚠️",
                "failed": "❌", "delay": "⏳", "importPending": "📥", "importing": "📥"}
 
@@ -115,9 +121,11 @@ class StallTracker:
         self._seen: dict[str, tuple[float, float]] = {}  # key -> (sizeleft, unchanged_since)
         self.stalled: set[str] = set()
 
-    def update(self, app: str, items: list[dict], now: float | None = None) -> tuple[list[tuple[str, dict]], list[str]]:
-        """Returns (newly_stalled [(key, item)], recovered keys)."""
+    def update(self, app: str, items: list[dict], now: float | None = None,
+               stall_s: float | None = None) -> tuple[list[tuple[str, dict]], list[str]]:
+        """Returns (newly_stalled [(key, item)], recovered keys). `stall_s` overrides the default for this app."""
         now = time.time() if now is None else now
+        stall_s = self.stall_s if stall_s is None else stall_s
         new_stalled: list[tuple[str, dict]] = []
         recovered: list[str] = []
         current: set[str] = set()
@@ -133,7 +141,7 @@ class StallTracker:
                     self.stalled.discard(key)
                     recovered.append(key)
                 continue
-            if now - prev[1] >= self.stall_s and key not in self.stalled:
+            if now - prev[1] >= stall_s and key not in self.stalled:
                 self.stalled.add(key)
                 new_stalled.append((key, it))
         for key in [k for k in self._seen if k.startswith(f"{app}:") and k not in current]:
@@ -147,17 +155,23 @@ class StallTracker:
 # ----- cog --------------------------------------------------------------------------------
 
 class Queue(commands.Cog):
+    """Queue / calendar / search / health / download-client commands and the stalled-download watcher.
+    Clients come from the media hub; alerts for an app go through the service that owns it."""
+
     def __init__(self, bot):
         self.bot = bot
-        self.svc = bot.svc
-        self.tracker = StallTracker(bot.cfg.queue_stall_min * 60)
-        register(bot,
-                 ("queue", "Active downloads with progress", self.queue),
-                 ("remove", "Remove an item from a download queue (admin)", self.remove),
-                 ("calendar", "Upcoming episodes, movies and albums", self.calendar),
-                 ("search", "Look up a series / movie / artist (read-only)", self.search),
-                 ("health", "Health messages from every app + Prowlarr indexer status", self.health),
-                 ("clients", "qBittorrent / SABnzbd transfer summary", self.clients))
+        self.hub = bot.media_hub
+        self.hub.queue_cog = self
+        self.svc = self.hub.svc
+        self.tracker = StallTracker(self.hub.cfg.queue_stall_min * 60)
+        if not self.hub.split:  # v1: everything under one /arr; v2: the hub builds /sonarr, /radarr, …
+            register(bot,
+                     ("queue", "Active downloads with progress", self.queue),
+                     ("remove", "Remove an item from a download queue (admin)", self.remove),
+                     ("calendar", "Upcoming episodes, movies and albums", self.calendar),
+                     ("search", "Look up a series / movie / artist (read-only)", self.search),
+                     ("health", "Health messages from every app + Prowlarr indexer status", self.health),
+                     ("clients", "qBittorrent / SABnzbd transfer summary", self.clients))
         self.stall_watch.start()
 
     async def cog_unload(self):
@@ -231,9 +245,10 @@ class Queue(commands.Cog):
 
     # ----- /arr calendar ---------------------------------------------------------------
 
-    @discord.app_commands.describe(days="How many days ahead (1–30)")
-    async def calendar(self, interaction: discord.Interaction, days: discord.app_commands.Range[int, 1, 30] = 7):
-        apps = await self._apps_or_error(interaction, None)
+    @discord.app_commands.describe(days="How many days ahead (1–30)", app="Limit to one app (default: all configured)")
+    async def calendar(self, interaction: discord.Interaction, days: discord.app_commands.Range[int, 1, 30] = 7,
+                       app: QueueApp | None = None):
+        apps = await self._apps_or_error(interaction, app)
         if not apps:
             return
         await interaction.response.defer()
@@ -299,19 +314,25 @@ class Queue(commands.Cog):
 
     # ----- /arr health -----------------------------------------------------------------
 
-    async def health(self, interaction: discord.Interaction):
+    @discord.app_commands.describe(app="Limit to one app (default: every configured app)")
+    async def health(self, interaction: discord.Interaction, app: HealthApp | None = None):
+        if app is not None and app not in self.svc.arr:
+            await interaction.response.send_message(f"🚫 {app} is not configured (set {app.upper()}_URL).", ephemeral=True)
+            return
         await interaction.response.defer()
-        e = lab_embed("*arr health", lab_name=self.bot.lab_name)
+        e = lab_embed("*arr health" if app is None else f"{app} health", lab_name=self.bot.lab_name)
         worst = Severity.OK
-        for app, client in self.svc.arr.items():
+        for name, client in self.svc.arr.items():
+            if app is not None and name != app:
+                continue
             try:
                 issues = await client.health()
             except Exception as ex:
-                e.add_field(name=f"🔴 {app}", value=truncate(f"unreachable: {ex}", 1024), inline=False)
+                e.add_field(name=f"🔴 {name}", value=truncate(f"unreachable: {ex}", 1024), inline=False)
                 worst = Severity.CRITICAL
                 continue
             if not issues:
-                e.add_field(name=f"🟢 {app}", value="No health issues.", inline=False)
+                e.add_field(name=f"🟢 {name}", value="No health issues.", inline=False)
                 continue
             lines = []
             for h in issues:
@@ -321,8 +342,8 @@ class Queue(commands.Cog):
                     worst = Severity.CRITICAL
                 elif worst is Severity.OK:
                     worst = Severity.WARNING
-            e.add_field(name=f"🟡 {app} ({len(issues)})", value=truncate("\n".join(lines), 1024), inline=False)
-        prowlarr = self.svc.arr.get("prowlarr")
+            e.add_field(name=f"🟡 {name} ({len(issues)})", value=truncate("\n".join(lines), 1024), inline=False)
+        prowlarr = self.svc.arr.get("prowlarr") if app in (None, "prowlarr") else None
         if prowlarr:
             try:
                 statuses = await prowlarr.indexer_status()
@@ -346,17 +367,21 @@ class Queue(commands.Cog):
 
     # ----- /arr clients ----------------------------------------------------------------
 
-    async def clients(self, interaction: discord.Interaction):
-        if not self.svc.qbit and not self.svc.sab:
-            await interaction.response.send_message("🚫 No download client configured (QBIT_URL / SABNZBD_URL).",
-                                                    ephemeral=True)
+    @discord.app_commands.describe(client="Limit to one download client (default: every configured one)")
+    async def clients(self, interaction: discord.Interaction, client: DownloadClient | None = None):
+        qbit = self.svc.qbit if client in (None, "qbittorrent") else None
+        sab = self.svc.sab if client in (None, "sabnzbd") else None
+        if not qbit and not sab:
+            msg = (f"🚫 {client} is not configured (set {'QBIT_URL' if client == 'qbittorrent' else 'SABNZBD_URL'})." if client
+                   else "🚫 No download client configured (QBIT_URL / SABNZBD_URL).")
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         await interaction.response.defer()
         e = lab_embed("Download clients", lab_name=self.bot.lab_name)
-        if self.svc.qbit:
+        if qbit:
             try:
-                info = await self.svc.qbit.transfer_info()
-                active = await self.svc.qbit.torrents_info("downloading")
+                info = await qbit.transfer_info()
+                active = await qbit.torrents_info("downloading")
                 e.add_field(name="qBittorrent",
                             value=(f"⬇️ {human_bytes(info.get('dl_info_speed'))}/s · ⬆️ {human_bytes(info.get('up_info_speed'))}/s\n"
                                    f"Active: **{len(active)}** · Session: ⬇️ {human_bytes(info.get('dl_info_data'))} "
@@ -364,9 +389,9 @@ class Queue(commands.Cog):
                                    f"Connection: {info.get('connection_status', '?')}"), inline=False)
             except Exception as ex:
                 e.add_field(name="🔴 qBittorrent", value=truncate(str(ex), 1024), inline=False)
-        if self.svc.sab:
+        if sab:
             try:
-                q = await self.svc.sab.queue()
+                q = await sab.queue()
                 e.add_field(name="SABnzbd",
                             value=(f"⬇️ {human_bytes(float(q.get('kbpersec') or 0) * 1024)}/s · status: {q.get('status', '?')}\n"
                                    f"Active: **{q.get('noofslots', 0)}** · {float(q.get('mbleft') or 0):.0f} MB left"
@@ -390,10 +415,11 @@ class Queue(commands.Cog):
                 await note_reachability(self.bot, app, False, str(e))
                 continue
             await note_reachability(self.bot, app, True)
-            new_stalled, recovered = self.tracker.update(app, items)
+            mins = self.hub.cfg_for(app).queue_stall_min
+            alerts = self.hub.alerts_for(app)
+            new_stalled, recovered = self.tracker.update(app, items, stall_s=mins * 60)
             for key, it in new_stalled:
-                mins = self.bot.cfg.queue_stall_min
-                await self.bot.alerts.fire(Alert(
+                await alerts.fire(Alert(
                     fingerprint=f"arr:{app}:stalled:{it.get('id')}",
                     title=f"{app}: download stalled",
                     description=f"**{queue_item_name(app, it)}** has not progressed in {mins} min.\n"
@@ -402,7 +428,7 @@ class Queue(commands.Cog):
                     fields={"Client": it.get("downloadClient") or "—", "Indexer": it.get("indexer") or "—",
                             "Queue id": str(it.get("id"))}))
             for key in recovered:
-                await self.bot.alerts.resolve(f"arr:{key.replace(':', ':stalled:', 1)}", note="Progressing or gone")
+                await alerts.resolve(f"arr:{key.replace(':', ':stalled:', 1)}", note="Progressing or gone")
 
     @stall_watch.before_loop
     async def _wait(self):

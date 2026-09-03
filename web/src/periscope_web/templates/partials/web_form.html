@@ -1,0 +1,43 @@
+<form id="web-form" class="card bg-base-200 shadow-sm" method="post" action="/discord/web" hx-post="/discord/web" hx-target="#web-form" hx-swap="outerHTML" autocomplete="off">
+  <div class="card-body p-4 gap-3">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h3 class="text-xs uppercase tracking-widest opacity-60">Web sign-in (Discord OAuth2)</h3>
+    <p class="text-xs opacity-70">Developer portal → your application → OAuth2 → add the redirect <span class="mono select-all">{{ redirect_uri }}</span>. Members holding one of the allowed roles in the lab server may sign in{% if not allowed_ids and not admin_ids %} — none configured, so only the server owner can{% endif %}.</p>
+    <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
+      <div class="form-control md:col-span-2">
+        <label class="label py-1"><span class="label-text text-sm">Public base URL</span><span class="label-text-alt mono opacity-40 text-[10px]">web.base_url</span></label>
+        <input name="base_url" value="{{ web.base_url }}" class="input input-bordered input-sm mono" placeholder="https://periscope.example.com (behind your reverse proxy)">
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">OAuth2 client id</span><span class="label-text-alt mono opacity-40 text-[10px]">web.oauth_client_id</span></label>
+        <input name="oauth_client_id" value="{{ web.oauth_client_id }}" class="input input-bordered input-sm mono" placeholder="application id">
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">OAuth2 client secret</span><span class="label-text-alt mono opacity-40 text-[10px]">web.oauth_client_secret</span></label>
+        <div class="join">
+          <input type="password" name="oauth_client_secret" class="input input-bordered input-sm join-item w-full mono" placeholder="{{ '•••• set — leave blank to keep' if web.oauth_client_secret else 'not set' }}" autocomplete="new-password">
+          {% if web.oauth_client_secret %}<label class="join-item btn btn-sm btn-ghost gap-1 border-base-300"><input type="checkbox" name="clear_oauth_client_secret" value="true" class="checkbox checkbox-xs"> clear</label>{% endif %}
+        </div>
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Allowed roles</span><span class="label-text-alt mono opacity-40 text-[10px]">web.allowed_role_ids</span></label>
+        {% if roles %}
+        <select name="allowed_role_ids" multiple class="select select-bordered select-sm h-24">
+          {% for r in roles %}<option value="{{ r.id }}" {% if r.id in allowed_ids %}selected{% endif %}>{{ r.label }}</option>{% endfor %}
+        </select>
+        {% else %}
+        <input name="allowed_role_ids" value="{{ allowed_ids | join(',') }}" class="input input-bordered input-sm mono" placeholder="role ids, comma-separated">
+        {% endif %}
+        <span class="label-text-alt opacity-60 text-xs mt-1">empty = the admin roles above</span>
+      </div>
+      <div class="form-control">
+        <label class="label py-1"><span class="label-text text-sm">Web port</span><span class="label-text-alt mono opacity-40 text-[10px]">web.port</span></label>
+        <input type="number" name="port" value="{{ web.port }}" min="1" max="65535" class="input input-bordered input-sm mono">
+      </div>
+    </div>
+    <div class="card-actions items-center gap-3 mt-2">
+      <button class="btn btn-primary btn-sm">Save</button>
+      <span class="text-xs opacity-60">sign-in settings apply immediately; the port on restart</span>
+    </div>
+  </div>
+</form>

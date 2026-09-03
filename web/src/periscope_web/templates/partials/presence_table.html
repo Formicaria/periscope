@@ -1,0 +1,12 @@
+<div id="presence-table" class="overflow-x-auto rounded-box bg-base-200 shadow-sm">
+  <table class="table table-sm">
+    <thead><tr>
+      <th>presence</th><th>token</th><th>services</th><th>connected as</th><th>invite</th><th class="text-right">actions</th>
+    </tr></thead>
+    <tbody>
+      {% for row in rows %}
+      {% include "partials/presence_row.html" %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

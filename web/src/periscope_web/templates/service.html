@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ spec.title }}{% endblock %}
+{% block heading %}<a href="/" class="opacity-50 hover:opacity-100">Overview</a> <span class="opacity-30">/</span> {{ spec.title }}{% endblock %}
+{% block content %}
+<div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+  <div>
+    {% include "partials/service_form.html" %}
+  </div>
+  <aside class="space-y-4 text-sm">
+    <div class="card bg-base-200 shadow-sm"><div class="card-body p-4 gap-2">
+      <h3 class="font-semibold">{{ spec.title }}</h3>
+      <p class="text-xs opacity-70">{{ spec.description }}</p>
+      <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 mt-2">
+        <dt class="opacity-60">state</dt><dd><span class="badge badge-sm {{ state_badge(live.state or ('disabled' if not enabled else 'pending')) }}">{{ live.state or ('disabled' if not enabled else 'pending restart') }}</span></dd>
+        {% if live.error %}<dt class="opacity-60">last error</dt><dd class="text-error break-words">{{ live.error }}</dd>{% endif %}
+        {% if spec.slash %}<dt class="opacity-60">commands</dt><dd class="mono">{{ spec.slash }}</dd>{% endif %}
+        {% if webhook.needs %}<dt class="opacity-60">webhook</dt><dd class="mono break-all">http://&lt;host&gt;:{{ webhook.port }}{{ webhook.paths | join(', ') }}?token=&lt;webhook secret&gt;</dd>{% endif %}
+        {% if spec.intents %}<dt class="opacity-60">intents</dt><dd class="mono">{{ spec.intents | join(', ') }}</dd>{% endif %}
+      </dl>
+    </div></div>
+    <div class="text-xs opacity-60 px-1">
+      Saved settings are written to <span class="mono">config/periscope.yaml</span> and apply on the next restart. Secrets are never shown again once set.
+    </div>
+  </aside>
+</div>
+{% endblock %}

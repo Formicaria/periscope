@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "periscope"
-version = "1.0.0"
+version = "2.0.0"
 description = "periscope core: bot base, embeds, alert routing, status boards, views, webhooks for the periscope Discord bot pack."
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,6 +13,7 @@ dependencies = [
     "discord.py>=2.4,<3",
     "aiohttp>=3.9,<4",
     "python-dotenv>=1.0",
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]

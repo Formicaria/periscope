@@ -111,7 +111,8 @@ class CiTrains:
         runs = self.tracked()
         if rid in runs:
             return False
-        channel_id = self.cfg.ci_channel_id or self.cfg.feed_channel_id or self.bot.settings.alert_channel_id
+        targets = self.cfg.channels_for(repo, "workflow_run", self.bot.settings.alert_channel_id)
+        channel_id = targets[0] if targets else None
         if not channel_id:
             return False
         ch = await self.bot.get_channel_safe(channel_id)

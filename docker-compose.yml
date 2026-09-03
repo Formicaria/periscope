@@ -1,49 +1,18 @@
-# periscope — Docker (secondary deploy path). Same per-bot .env files as the systemd install:
-#   periscope init proxmox   (or: cp bots/proxmox/.env.example bots/proxmox/.env) → fill it in
-#   docker compose up -d proxmox unifi      # only the bots you want
-# Images are published by CI; uncomment `build:` to build locally from this checkout.
-x-common: &common
-  restart: unless-stopped
-  environment:
-    DATA_DIR: /data
-  logging:
-    driver: json-file
-    options: { max-size: "10m", max-file: "3" }
-
+# periscope — Docker (secondary deploy path). One container runs every enabled service + the web UI.
+#   docker compose up -d
+#   open http://<host>:8090 — first sign-in uses the setup token from `docker compose logs periscope`
 services:
-  proxmox:
-    <<: *common
-    image: ghcr.io/formicaria/periscope-proxmox:latest
-    # build: { context: ., dockerfile: bots/proxmox/Dockerfile }
-    env_file: bots/proxmox/.env
-    volumes: [ "./bots/proxmox/data:/data" ]
-
-  prometheus:
-    <<: *common
-    image: ghcr.io/formicaria/periscope-prometheus:latest
-    # build: { context: ., dockerfile: bots/prometheus/Dockerfile }
-    env_file: bots/prometheus/.env
-    volumes: [ "./bots/prometheus/data:/data" ]
-
-  arr:
-    <<: *common
-    image: ghcr.io/formicaria/periscope-arr:latest
-    # build: { context: ., dockerfile: bots/arr/Dockerfile }
-    env_file: bots/arr/.env
-    volumes: [ "./bots/arr/data:/data" ]
-
-  unifi:
-    <<: *common
-    image: ghcr.io/formicaria/periscope-unifi:latest
-    # build: { context: ., dockerfile: bots/unifi/Dockerfile }
-    env_file: bots/unifi/.env
-    volumes: [ "./bots/unifi/data:/data" ]
-
-  github:
-    <<: *common
-    image: ghcr.io/formicaria/periscope-github:latest
-    # build: { context: ., dockerfile: bots/github/Dockerfile }
-    env_file: bots/github/.env
-    volumes: [ "./bots/github/data:/data" ]
-    ports: [ "8084:8084" ]   # GitHub must reach /github — put it behind your reverse proxy
-
+  periscope:
+    image: ghcr.io/formicaria/periscope:latest
+    # build: .
+    container_name: periscope
+    restart: unless-stopped
+    ports:
+      - "8090:8090"      # web UI
+      - "8080:8080"      # inbound webhooks (Sonarr/Radarr/Alertmanager/GitHub) — put behind your reverse proxy
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

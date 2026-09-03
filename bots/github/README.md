@@ -81,14 +81,7 @@ Signatures are verified with `X-Hub-Signature-256` over the raw body; deliveries
 
 From the periscope checkout (see the [pack README](../../README.md) for install):
 
-```bash
-periscope init github          # creates bots/github/.env
-nano bots/github/.env          # paste the values from the steps above
-periscope enable github
-periscope logs github          # look for "ready as ... (lab=my-lab)" and "synced N app commands"
-```
-
-Docker instead: `docker compose up -d github` from the repo root uses the same `bots/github/.env`.
+Open the web UI (`periscope web`) → **github** → fill in the values from the steps above → **Test** → **Save** → enable. From a terminal: `periscope config github KEY=VALUE …` then `periscope enable github`; `periscope check github` runs the same test.
 
 ## Configuration
 
@@ -140,7 +133,7 @@ Two sources, both feeding the same pipeline (dedupe by delivery id, so running b
 - **Polling** (default on when `GITHUB_TOKEN` is set): every `GITHUB_POLL_INTERVAL_S` the bot reads the org event feed (push, PR, issues, releases, forks, stars, branches, members…) **and** each repo's workflow runs — every Actions run (CI, release builds, anything with a workflow) gets a **live train card** in the CI channel the moment it's spotted, refreshed every 15 s with one line per job (⚪ queued · 🟡 running with `step n/m · name` · ✅ ❌ ⏭️ with duration) and finalized green/red with the total time. The event feed alone never carries runs. Nothing inbound needed. First run baselines silently — no history replay. Latency ≈ the poll interval.
 - **Org webhook** (optional, instant): github.com/organizations/&lt;org&gt;/settings/hooks → Add webhook → `https://<public-host>/github`, `application/json`, secret = `WEBHOOK_SECRET`, "Send me everything". Needs the bot's port reachable from GitHub (reverse proxy / Cloudflare Tunnel / Tailscale Funnel).
 
-Routing: `GITHUB_FEED_CHANNEL_ID` gets **every** event; CI results (`workflow_run`, `check_run`) go to `GITHUB_CI_CHANNEL_ID` instead (falls back to the feed); `GITHUB_REPO_CHANNEL_MAP` additionally mirrors a repo's non-CI events into its own channel. A failing workflow on a default branch also raises an alert in `ALERT_CHANNEL_ID` pinging `GITHUB_CI_FAILURE_ROLE_ID`, resolved in place when it goes green.
+Routing: `GITHUB_REPO_CHANNEL_MAP` gives each project its own channel that receives **everything** for those repos — commits, PRs, issues, releases and the live CI trains (`Anthill=123,micromound=123,SOVRGNnet.cc=456,periscope=789`, globs allowed). Repos not in the map go to `GITHUB_FEED_CHANNEL_ID` (CI to `GITHUB_CI_CHANNEL_ID`); leave both blank to drop unmapped repos. `GITHUB_MIRROR_TO_FEED=true` makes mapped repos also post to the catch-alls. `periscope layout` sets channel permissions (`#git-*` humans read-only / bots post, `#op-*` bots muted) and prints the map for you. A failing workflow on a default branch also raises an alert in `ALERT_CHANNEL_ID` pinging `GITHUB_CI_FAILURE_ROLE_ID`, resolved in place when it goes green.
 
 ## Alerts & robustness
 

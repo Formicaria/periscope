@@ -31,6 +31,7 @@ class WebhookServer:
         self.host = host
         self.port = port
         self.secret = secret
+        self.extra_secrets: set[str] = set()  # v2: per-service WEBHOOK_SECRET overrides are accepted too
         self.app = web.Application(client_max_size=4 * 1024 * 1024)
         self.app.router.add_get("/health", self._health)
         self._runner: web.AppRunner | None = None
@@ -43,18 +44,29 @@ class WebhookServer:
         ok = self._healthy()
         return web.json_response({"ok": ok}, status=200 if ok else 503)
 
+    @property
+    def secrets(self) -> set[str]:
+        return ({self.secret} if self.secret else set()) | {s for s in self.extra_secrets if s}
+
+    def accept_secret(self, secret: str | None) -> None:
+        if secret:
+            self.extra_secrets.add(secret)
+
     async def authorized(self, request: web.Request, body: bytes | None = None) -> bool:
-        if not self.secret:
+        secrets = self.secrets
+        if not secrets:
             return True
-        if request.headers.get("X-Webhook-Secret") == self.secret:
+        if request.headers.get("X-Webhook-Secret") in secrets:
             return True
-        if request.query.get("token") == self.secret:
+        if request.query.get("token") in secrets:
             return True
         sig = request.headers.get("X-Hub-Signature-256")
         if sig and sig.startswith("sha256="):
             body = body if body is not None else await request.read()
-            expected = hmac.new(self.secret.encode(), body, hashlib.sha256).hexdigest()
-            return hmac.compare_digest(sig[7:], expected)
+            for s in secrets:
+                expected = hmac.new(s.encode(), body, hashlib.sha256).hexdigest()
+                if hmac.compare_digest(sig[7:], expected):
+                    return True
         return False
 
     def add_route(self, method: str, path: str, handler: Handler, *, auth: bool = True) -> None:

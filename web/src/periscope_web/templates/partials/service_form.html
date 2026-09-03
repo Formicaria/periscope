@@ -1,0 +1,79 @@
+<form id="service-form" method="post" action="/services/{{ name }}" hx-post="/services/{{ name }}" hx-target="#service-form" hx-swap="outerHTML" class="space-y-6" autocomplete="off">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if errors %}
+  <div class="alert alert-error py-2 text-sm"><ul class="list-disc list-inside">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+  {% endif %}
+
+  <section class="card bg-base-200 shadow-sm"><div class="card-body p-4 gap-3">
+    <div class="flex flex-wrap items-center gap-4">
+      <label class="label cursor-pointer gap-3 p-0">
+        <input type="checkbox" name="_enabled" value="true" class="toggle toggle-primary" {% if enabled %}checked{% endif %}>
+        <span class="label-text font-medium">Enabled</span>
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <span class="opacity-70">posts as</span>
+        <select name="_presence" class="select select-bordered select-sm mono">
+          {% for pname, plabel, has_token in presences %}
+          <option value="{{ pname }}" {% if pname == presence %}selected{% endif %}>{{ pname }} · {{ plabel }}{% if not has_token %} (no token){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <a href="/presences" class="link link-hover text-xs opacity-60">manage presences</a>
+    </div>
+  </div></section>
+
+  {% for group, fields in groups %}
+  <section class="card bg-base-200 shadow-sm"><div class="card-body p-4 gap-3">
+    <h3 class="text-xs uppercase tracking-widest opacity-60">{{ group }}</h3>
+    <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
+      {% for f in fields %}
+      <div class="form-control {% if f.type in ('list', 'url') and not f.is_select %}md:col-span-2{% endif %}">
+        <label class="label py-1" for="f-{{ f.key }}">
+          <span class="label-text text-sm">{{ f.label }}{% if f.required %} <span class="text-error" title="required">*</span>{% endif %}</span>
+          <span class="label-text-alt mono opacity-40 text-[10px]">{{ f.key }}</span>
+        </label>
+        {% if f.type == 'bool' %}
+        <input type="hidden" name="{{ f.key }}" value="false">
+        <label class="label cursor-pointer justify-start gap-3 py-1">
+          <input type="checkbox" id="f-{{ f.key }}" name="{{ f.key }}" value="true" class="toggle toggle-sm" {% if f.checked %}checked{% endif %}>
+          <span class="label-text text-xs opacity-70">{{ f.help }}</span>
+        </label>
+        {% elif f.is_select %}
+        <select id="f-{{ f.key }}" name="{{ f.key }}" class="select select-bordered select-sm w-full">
+          <option value="">{{ f.lab_default or ('—' if f.type != 'choice' else 'default') }}</option>
+          {% if f.unknown_option %}<option value="{{ f.unknown_option }}" selected class="mono">{{ f.unknown_option }} (not found)</option>{% endif %}
+          {% for value, label in f.options %}
+          <option value="{{ value }}" {% if value == f.value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {% elif f.type == 'secret' %}
+        <div class="join w-full">
+          <input type="password" id="f-{{ f.key }}" name="{{ f.key }}" class="input input-bordered input-sm join-item w-full mono" placeholder="{{ f.placeholder }}" autocomplete="new-password">
+          {% if f.is_set %}
+          <label class="join-item btn btn-sm btn-ghost gap-1 border-base-300" title="remove the stored value on save">
+            <input type="checkbox" name="clear_{{ f.key }}" value="true" class="checkbox checkbox-xs"> clear
+          </label>
+          {% endif %}
+        </div>
+        {% else %}
+        <input type="{{ f.input_type }}" id="f-{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" placeholder="{{ f.lab_default or f.placeholder }}"
+               class="input input-bordered input-sm w-full {% if f.type in ('channel', 'role', 'int', 'list') %}mono{% endif %}" {% if f.type == 'int' %}inputmode="numeric"{% endif %}>
+        {% endif %}
+        {% if f.help and f.type != 'bool' %}<span class="label-text-alt opacity-60 text-xs mt-1">{{ f.help }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div></section>
+  {% endfor %}
+
+  <div class="flex flex-wrap items-center gap-2 sticky bottom-0 py-3 bg-base-100/90 backdrop-blur border-t border-base-300/60">
+    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    {% if spec.check %}
+    <button type="button" class="btn btn-ghost btn-sm" hx-post="/services/{{ name }}/check" hx-include="#service-form" hx-target="#check-{{ name }}" hx-swap="innerHTML" hx-indicator="this">
+      <span class="htmx-indicator loading loading-spinner loading-xs"></span>Test these values
+    </button>
+    {% endif %}
+    <span class="text-xs opacity-60">saves to the config store; restart to apply</span>
+    <div id="check-{{ name }}" class="w-full sm:w-auto sm:ml-auto"></div>
+  </div>
+</form>

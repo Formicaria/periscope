@@ -1,0 +1,101 @@
+<div id="setup-steps" class="max-w-3xl space-y-4">
+  <ul class="steps steps-horizontal w-full text-xs mb-2">
+    <li class="step {{ 'step-primary' if steps.token else '' }}">Bot token</li>
+    <li class="step {{ 'step-primary' if steps.guild else '' }}">Server</li>
+    <li class="step {{ 'step-primary' if steps.layout else '' }}">Channels</li>
+    <li class="step {{ 'step-primary' if steps.services else '' }}">Services</li>
+  </ul>
+
+  {# ---- 1 token ---- #}
+  <div class="card bg-base-200 shadow-sm {% if current != 'token' and steps.token %}opacity-80{% endif %}">
+    <div class="card-body p-4 gap-3">
+      <div class="flex items-center gap-2"><span class="badge {{ 'badge-success' if steps.token else 'badge-primary' }} badge-sm">1</span><h3 class="font-semibold">Bot token</h3>
+        {% if steps.token %}<span class="text-xs opacity-60 ml-auto">presence <span class="mono">{{ presence }}</span> has a token</span>{% endif %}</div>
+      <p class="text-xs opacity-70"><a href="https://discord.com/developers/applications" target="_blank" rel="noopener" class="link">Developer portal</a> → New Application → <b>Bot</b> → <b>Reset Token</b>. No privileged intents are needed. The token is verified against Discord and never shown again.</p>
+      <form hx-post="/setup/token" hx-target="#setup-steps" hx-swap="outerHTML" method="post" action="/setup/token" class="flex flex-wrap gap-2" autocomplete="off">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="presence" value="default">
+        <input type="password" name="token" class="input input-bordered input-sm mono flex-1 min-w-64" placeholder="{{ 'paste a new token to replace it' if steps.token else 'paste the bot token' }}" autocomplete="new-password" required>
+        <button class="btn btn-primary btn-sm">Check &amp; save</button>
+      </form>
+      {% if invite %}
+      <div class="alert alert-info py-2 text-sm"><span>Invite the bot to your server: <a href="{{ invite }}" target="_blank" rel="noopener" class="link font-medium">open the invite link</a> (scopes bot + applications.commands, permissions to post, manage messages/channels/roles).</span></div>
+      {% elif steps.token %}
+      <div class="text-xs opacity-60">Invite link: see <a href="/presences" class="link">Presences</a>.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---- 2 guild ---- #}
+  <div class="card bg-base-200 shadow-sm {% if not steps.token %}opacity-50{% endif %}">
+    <div class="card-body p-4 gap-3">
+      <div class="flex items-center gap-2"><span class="badge {{ 'badge-success' if steps.guild else 'badge-primary' }} badge-sm">2</span><h3 class="font-semibold">Server</h3>
+        {% if steps.guild %}<span class="text-xs opacity-60 ml-auto mono">{{ guild_id }}</span>{% endif %}</div>
+      {% if steps.token %}
+      <form hx-post="/setup/guild" hx-target="#setup-steps" hx-swap="outerHTML" method="post" action="/setup/guild" class="space-y-2">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        {% if guilds %}
+        <div class="space-y-1">
+          {% for g in guilds %}
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="radio" name="guild_id" value="{{ g.id }}" class="radio radio-sm" {% if loop.first %}checked{% endif %} onchange="this.form.guild_name.value=this.dataset.name" data-name="{{ g.name }}">
+            <span>{{ g.name }}</span><span class="mono opacity-50 text-xs">{{ g.id }}</span>{% if g.owner %}<span class="badge badge-ghost badge-xs">owner</span>{% endif %}
+          </label>
+          {% endfor %}
+        </div>
+        <input type="hidden" name="guild_name" value="{{ guilds[0].name }}">
+        {% elif not steps.guild %}
+        <p class="text-xs opacity-70">{{ guild_error or 'The bot is not in any server yet — use the invite link above, then' }} <a href="/setup" class="link">refresh</a>. Or paste the server id:</p>
+        <input name="guild_id" class="input input-bordered input-sm mono" placeholder="server id" pattern="\d+">
+        {% else %}
+        <p class="text-xs opacity-70">Saved. To change it, edit the server id on the <a href="/discord" class="link">Discord page</a>.</p>
+        {% endif %}
+        {% if not steps.guild %}<button class="btn btn-primary btn-sm">Use this server</button>{% endif %}
+      </form>
+      {% else %}<p class="text-xs opacity-60">set a bot token first</p>{% endif %}
+    </div>
+  </div>
+
+  {# ---- 3 layout ---- #}
+  <div class="card bg-base-200 shadow-sm {% if not steps.guild %}opacity-50{% endif %}">
+    <div class="card-body p-4 gap-3">
+      <div class="flex items-center gap-2"><span class="badge {{ 'badge-success' if steps.layout else 'badge-primary' }} badge-sm">3</span><h3 class="font-semibold">Channel layout</h3></div>
+      {% if layout %}
+      <div class="flex flex-wrap gap-1">
+        {% for c in layout.channels %}<span class="badge badge-sm {{ 'badge-success' if c.exists else 'badge-ghost' }} mono">#{{ c.name }}</span>{% endfor %}
+        {% for r in layout.roles %}<span class="badge badge-sm {{ 'badge-success' if r.exists else 'badge-ghost' }} mono">@{{ r.name }}</span>{% endfor %}
+      </div>
+      {% if not layout.available %}<p class="text-xs opacity-70">The bot cannot see the server yet — invite it first.</p>{% endif %}
+      {% if layout.missing_channels or layout.missing_roles %}
+      <form hx-post="/setup/layout" hx-target="#setup-steps" hx-swap="outerHTML" hx-indicator="this" method="post" action="/setup/layout">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn btn-primary btn-sm"><span class="htmx-indicator loading loading-spinner loading-xs"></span>Create missing channels and roles</button>
+        <span class="text-xs opacity-60 ml-2">also fills the lab defaults (#lab-status, #lab-alerts, @lab-oncall, @lab-admin)</span>
+      </form>
+      {% else %}
+      <p class="text-xs opacity-70">Layout complete. Per-project <span class="mono">#git-*</span> feeds: <a href="/discord" class="link">Discord page</a>.</p>
+      {% endif %}
+      {% if report %}<pre class="mono text-xs bg-base-300 rounded-box p-3 whitespace-pre-wrap">{{ report | join('\n') }}</pre>{% endif %}
+      {% else %}<p class="text-xs opacity-60">pick a server first</p>{% endif %}
+    </div>
+  </div>
+
+  {# ---- 4 services ---- #}
+  <div class="card bg-base-200 shadow-sm {% if not steps.guild %}opacity-50{% endif %}">
+    <div class="card-body p-4 gap-3">
+      <div class="flex items-center gap-2"><span class="badge {{ 'badge-success' if steps.services else 'badge-primary' }} badge-sm">4</span><h3 class="font-semibold">Add a service</h3>
+        {% if enabled %}<span class="text-xs opacity-60 ml-auto">{{ enabled | join(', ') }}</span>{% endif %}</div>
+      <p class="text-xs opacity-70">Each service page has a Test button that checks the credentials before you save.</p>
+      <div class="flex flex-wrap gap-2">
+        {% for s in specs %}
+        <a href="/services/{{ s.name }}" class="btn btn-sm {{ 'btn-outline btn-success' if s.name in enabled else 'btn-ghost border-base-300' }}">{{ s.title }}<span class="badge badge-ghost badge-xs">{{ s.group }}</span></a>
+        {% else %}
+        <span class="text-xs opacity-60">no service packages installed</span>
+        {% endfor %}
+      </div>
+      {% if steps.token and steps.guild %}
+      <div class="alert py-2 text-sm mt-2"><span>When you are done: <b>restart to apply</b> (button in the header) — services connect on start.</span></div>
+      {% endif %}
+    </div>
+  </div>
+</div>

@@ -112,5 +112,7 @@ class AlertRouter:
         return True
 
     def active(self) -> list[str]:
+        # `bot.state` is the root JsonState for a v1 LabBot but a NamespacedState for a v2 ServiceBot;
+        # the alerts namespace always hangs off the root, so walk to it from there.
         prefix = self._state._prefix
-        return [k[len(prefix):] for k in self.bot.state._data if k.startswith(prefix)]
+        return [k[len(prefix):] for k in self._state._p._data if k.startswith(prefix)]

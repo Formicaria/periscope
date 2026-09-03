@@ -20,8 +20,9 @@
 | [`arr`](bots/arr) | Sonarr · Radarr · Lidarr · Prowlarr · qBittorrent/SAB · Plex/Jellyfin | `/arr` | grabs/imports with posters, queue + stall alerts, calendar, now-playing |
 | [`unifi`](bots/unifi) | UniFi | `/unifi` | WAN/devices/clients board, new-client + device-offline alerts, kick/block/restart |
 | [`github`](bots/github) | a GitHub organization | `/gh` | push/PR/issue/release/CI/fork/star feed, per-repo channel routing, CI-failure alerts, polling fallback |
+| [`plexrequests`](bots/plexrequests) | Plex · Overseerr/Jellyseerr or Radarr/Sonarr | `/requests` + `/plexinvite` | **Get Plex Access** invites with role grant, **Search & Request** with availability cards, live status board, new-on-Plex feed, auto-revoke, usage stats |
 
-Everything shares [`core/`](core): branded embeds, an alert router (dedupe, cooldown, resolve-in-place, role ping on critical), pinned live status boards, Confirm/Paginate/Refresh views, an HMAC-checked webhook server, and JSON state. Each bot is its own Discord application and its own systemd service, so one crashing or restarting never touches the others.
+Everything shares [`core/`](core): branded embeds, an alert router (dedupe, cooldown, resolve-in-place, role ping on critical), pinned live status boards, Confirm/Paginate/Refresh views, an HMAC-checked webhook server, and JSON state. Every integration is a *service* you switch on individually; they all run in one process and are supervised separately, so one failing never touches the others. Design notes: [`docs/SPEC-v2.md`](docs/SPEC-v2.md).
 
 ## Install (Debian/Ubuntu — LXC, VM, or bare metal)
 
@@ -29,14 +30,25 @@ Everything shares [`core/`](core): branded embeds, an alert router (dedupe, cool
 apt-get update && apt-get install -y git
 git clone https://github.com/formicaria/periscope /opt/periscope
 cd /opt/periscope
-bash setup.sh                      # python + venv + all bots + `periscope` CLI. Enables nothing yet.
-
-periscope init proxmox             # guided setup — see below
+bash setup.sh          # python + venv + every service + web UI, one systemd service: periscope
 ```
 
-`periscope init <bot>` walks you through it and checks every answer before saving: paste the bot token (verified against Discord, prints the invite link if the bot isn't in a server yet), it finds or **creates the channels and roles** it needs, asks for the service credentials (Proxmox token, *arr keys, UniFi login, GitHub PAT…) and tests each one against the real service, writes `bots/<bot>/.env`, and starts the bot. Shared answers (server, channels, roles, lab name) are remembered in `periscope.json`, so the second bot only asks for its own token and credentials. Repeat for every bot you want (`proxmox prometheus arr unifi github`). Prefer editing by hand? `periscope init <bot> --manual` copies the example `.env` for you.
+Then open the web UI (`periscope web` prints the address, default `http://<box>:8090`), sign in once with the
+setup token from the log (`journalctl -u periscope | grep 'setup token'`), and the first-run flow takes it from
+there: paste a bot token → invite link → pick the server → create the channel layout → enable services one by one,
+each with a **Test** button that checks the credentials against the real thing. Afterwards sign-in is Discord OAuth
+for members holding `@lab-admin`. Prefer a terminal? `periscope init` does the token/server step, then
+`periscope config <service> KEY=VALUE` and `periscope enable <service>`.
 
-Each bot's `.env` and `data/` stay inside `bots/<bot>/` and are gitignored. `setup.sh` is idempotent: re-running it (or `periscope update`) re-enables every bot whose `.env` has a token.
+Everything lives in one process (`python -m periscope`, unit `periscope.service`) and one file, `config/periscope.yaml`
+(mode 0600). Services post through *presences* — Discord identities. New installs get one shared bot; any service can
+be pointed at its own application in the UI (**Presences**) so it keeps its own name and avatar.
+
+### Coming from v1 (one unit per bot)
+
+`periscope update` does it: the runtime imports every `bots/*/.env` (and `/opt/displexia/.env` if that bot ran on
+the box) into `config/periscope.yaml` on first start — one presence per old bot, so nothing changes in Discord — and
+retires the `periscope@<bot>` units. The old `.env` files are left untouched; delete them when you're happy.
 
 ### Proxmox LXC in one command
 
@@ -46,53 +58,38 @@ On the PVE host, as root — creates a Debian 12 unprivileged CT (2 cores / 1 GB
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/formicaria/periscope/main/deploy/lxc-create.sh)"
 ```
 
-Override anything with env vars: `CTID=210 IP=192.168.1.50/24 GW=192.168.1.1 VLAN=20 STORAGE=zfs bash lxc-create.sh`. Then `pct enter <CTID>` and `init` / `enable` the bots you want.
+Override anything with env vars: `CTID=210 IP=192.168.1.50/24 GW=192.168.1.1 VLAN=20 STORAGE=zfs bash lxc-create.sh`.
 
 ### Docker (secondary)
 
-Same per-bot `.env` files, one service per bot:
-
-```bash
-periscope init proxmox && nano bots/proxmox/.env      # or cp bots/proxmox/.env.example bots/proxmox/.env
-docker compose up -d proxmox unifi                    # only the bots you want
-```
-
-Images: `ghcr.io/formicaria/periscope-<bot>:latest` (amd64 + arm64), or uncomment `build:` in `docker-compose.yml`.
+`docker compose up -d` from the repo root runs the same single process from `ghcr.io/formicaria/periscope` with
+`./config` and `./data` mounted; ports 8080 (webhooks) and 8090 (web UI).
 
 ## The `periscope` CLI
 
 ```
-periscope list              every bot with active / enabled / .env state
-periscope init <bot>        guided setup (verifies credentials, creates channels/roles, starts the bot); --manual to skip
-periscope enable <bot…>     start now + on boot (needs a filled .env)
-periscope disable <bot…>    stop and remove from boot
-periscope status [bot]      service status
-periscope logs [bot]        follow the live logs (all bots when omitted)
-periscope restart [bot…]    restart one bot, or every running one
-periscope config <bot>      the active .env, secrets masked
-periscope update            git pull, reinstall, restart every enabled bot
+periscope web                  where the admin UI is
+periscope list                 every service: enabled · state · presence
+periscope enable <svc…>        turn a service on (config must be complete)     periscope disable <svc…>
+periscope check <svc>          test a service's credentials right now
+periscope config <svc> [K=V]   show or set a service's settings, secrets masked
+periscope presence …           add identities, set tokens, assign services
+periscope layout               apply the #git-* / #op-* channel convention, print the repo→channel map
+periscope status | logs [svc]  runtime status, live log (filtered to one service)
+periscope restart|start|stop   the service        periscope update   git pull, reinstall, restart
 ```
 
-Every future update: `git push` from your machine, then `periscope update` on the box.
+Config changes (UI or CLI) apply on restart; the UI shows a "restart to apply" banner and a button.
 
-## Before `periscope init` — what each bot needs from you
+## Discord setup (once per presence)
 
-| bot | have ready |
-|---|---|
-| every bot | its Discord bot token (below) |
-| `proxmox` | PVE URL (`https://<node-ip>:8006`) + an API token — run on any PVE node as root:<br>`pveum user add periscope@pve --comment "periscope Discord bot"`<br>`pveum role add Periscope -privs "VM.Audit VM.PowerMgmt Datastore.Audit Sys.Audit"`<br>`pveum acl modify / -user periscope@pve -role Periscope`<br>`pveum user token add periscope@pve discord --privsep 0`<br>The last line prints the secret once (`value` row); token id is `periscope@pve!discord`. |
-| `arr` | Sonarr/Radarr URLs + API keys (each app: Settings → General → Security → API Key). Plex token optional (reused from displexia if it's on the same box). |
-| `unifi` | Controller URL (`https://<ip>` for UDM/UCG, `https://<host>:8443` self-hosted) + a local-only admin: Settings → Admins → Add → *Restrict to local access only*, read-only is enough. |
-| `github` | Org name, a fine-grained read-only PAT (Settings → Developer settings → Fine-grained tokens; org access, Contents/Metadata/Actions read), and a public URL for the webhook — the wizard prints the exact webhook settings at the end. |
-| `prometheus` | Prometheus + Alertmanager URLs; Grafana URL + service-account token if you want panel screenshots. |
+<https://discord.com/developers/applications> → **New Application** → **Bot** → **Reset Token**. Paste it into the web
+UI (or `periscope presence token default`); it prints the invite link with the right permissions and detects the
+server once the bot joins. No privileged intents are needed unless you enable `plexrequests` (Server Members +
+Message Content, for auto-revoke and typed requests) — the UI says so on that service's page.
 
-URLs are always full `scheme://host[:port]`, no trailing path.
-
-## Discord setup (once per bot)
-
-The only thing you do in the Discord developer portal: <https://discord.com/developers/applications> → **New Application** (name it after the service, e.g. `Proxmox`) → **Bot** → **Reset Token**. No privileged intents are needed. `periscope init` takes it from there — it prints the invite link with the right permissions, detects the server once the bot joins, and creates or finds the channels and roles. (Doing it by hand instead: OAuth2 → URL Generator, scopes `bot` + `applications.commands`; then Developer Mode → right-click → Copy ID for every `*_ID` in `.env.example`.)
-
-Service-side steps (API tokens, webhooks) are in each bot's README. For THE LAB specifically: [`docs/discord-apps.md`](docs/discord-apps.md) has the existing applications and invite links, [`docs/server-layout.md`](docs/server-layout.md) the channel plan, and `scripts/setup_server.py` creates those channels and roles idempotently.
+For THE LAB specifically: [`docs/discord-apps.md`](docs/discord-apps.md) has the existing applications and channel
+ids, [`docs/server-layout.md`](docs/server-layout.md) the channel plan.
 
 ## Several people, one server
 

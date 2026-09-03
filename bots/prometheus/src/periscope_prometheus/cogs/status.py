@@ -1,4 +1,9 @@
-"""Live status board: service reachability, firing alerts, targets, silences."""
+"""Live status board: service reachability, firing alerts, targets, silences.
+
+The board shows whatever clients its bot carries. Under v2 the Alertmanager and Grafana clients may belong to
+sibling services on the same presence (`alertmanager`, `grafana`); they are picked up from there so one board
+still covers the whole monitoring stack. Anything not configured anywhere is shown as such.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ from ..format import count_by_severity, group_targets
 log = logging.getLogger(__name__)
 
 FAIL_THRESHOLD = 3
+SIBLINGS = {"prom": "prometheus", "am": "alertmanager", "grafana": "grafana"}
 
 
 class StatusCog(commands.Cog):
@@ -30,6 +36,26 @@ class StatusCog(commands.Cog):
 
     def cog_unload(self) -> None:
         self.tick.cancel()
+
+    # ----- clients (own first, then a sibling service on the same presence) ------
+
+    def owner(self, attr: str):
+        """The bot carrying client `attr`: this one, else the sibling service on the same presence, else None."""
+        if getattr(self.bot, attr, None) is not None:
+            return self.bot
+        presence = getattr(self.bot, "presence", None)
+        sibling = presence.service(SIBLINGS[attr]) if presence is not None else None
+        return sibling if sibling is not None and getattr(sibling, attr, None) is not None else None
+
+    def client(self, attr: str):
+        owner = self.owner(attr)
+        return getattr(owner, attr, None) if owner is not None else None
+
+    def _grafana(self):
+        gf = self.client("grafana")
+        if gf is None or not getattr(gf, "base_url", ""):
+            return None
+        return gf
 
     # ----- unreachable tracking ----------------------------------------------
 
@@ -54,20 +80,23 @@ class StatusCog(commands.Cog):
     async def build_embed(self) -> discord.Embed:
         bot = self.bot
         cfg = bot.cfg
-        prom_ok, am_ok, gf_ok = await asyncio.gather(
-            bot.prom.healthy(), bot.am.healthy(),
-            bot.grafana.healthy() if cfg.grafana_enabled else asyncio.sleep(0, result=None))
+        prom, am, grafana = self.client("prom"), self.client("am"), self._grafana()
+
+        async def probe(client) -> bool | None:
+            return await client.healthy() if client is not None else None
+
+        prom_ok, am_ok, gf_ok = await asyncio.gather(probe(prom), probe(am), probe(grafana))
 
         firing = targets = silences = None
         if prom_ok:
             try:
-                targets = await bot.prom.targets()
+                targets = await prom.targets()
             except Exception as e:
                 log.warning("targets fetch failed: %s", e)
                 prom_ok = False
         if am_ok:
             try:
-                firing, silences = await asyncio.gather(bot.am.alerts(), bot.am.silences())
+                firing, silences = await asyncio.gather(am.alerts(), am.silences())
             except Exception as e:
                 log.warning("alertmanager fetch failed: %s", e)
                 am_ok = False
@@ -85,7 +114,7 @@ class StatusCog(commands.Cog):
         up = sum(g["up"] for g in groups.values())
         down = sum(g["down"] for g in groups.values())
 
-        if not prom_ok or not am_ok or gf_ok is False:
+        if prom_ok is False or am_ok is False or gf_ok is False:
             sev = Severity.CRITICAL
         elif counts["critical"] or down:
             sev = Severity.CRITICAL
@@ -94,11 +123,14 @@ class StatusCog(commands.Cog):
         else:
             sev = Severity.OK
 
-        e = lab_embed("Monitoring status", severity=sev, lab_name=bot.lab_name, url=bot.prom.base_url)
-        e.add_field(name="Prometheus", value=f"{status_dot(prom_ok)} {'up' if prom_ok else 'down'}")
-        e.add_field(name="Alertmanager", value=f"{status_dot(am_ok)} {'up' if am_ok else 'down'}")
-        e.add_field(name="Grafana", value=f"{status_dot(gf_ok)} " + (
-            "not configured" if gf_ok is None else "up" if gf_ok else "down"))
+        def state(ok: bool | None) -> str:
+            return f"{status_dot(ok)} " + ("not configured" if ok is None else "up" if ok else "down")
+
+        home = next((c.base_url for c in (prom, am, grafana) if c is not None), None)
+        e = lab_embed("Monitoring status", severity=sev, lab_name=bot.lab_name, url=home)
+        e.add_field(name="Prometheus", value=state(prom_ok))
+        e.add_field(name="Alertmanager", value=state(am_ok))
+        e.add_field(name="Grafana", value=state(gf_ok))
         e.add_field(name="Firing alerts",
                     value=(f"🔴 {counts['critical']} critical\n🟡 {counts['warning']} warning\n🔵 {counts['info']} info")
                     if firing is not None else "—")
@@ -109,12 +141,18 @@ class StatusCog(commands.Cog):
             lines = [f"• {job}: " + ", ".join(f"`{i}`" for i, _ in g["down_list"][:4])
                      for job, g in groups.items() if g["down"]]
             e.add_field(name="Down targets", value="\n".join(lines)[:1024], inline=False)
-        links = [f"[Prometheus]({bot.prom.base_url})", f"[Alertmanager]({bot.am.base_url})"]
-        if cfg.grafana_enabled:
-            links.append(f"[Grafana]({bot.grafana.base_url})")
-            if cfg.default_dashboard_uid:
-                links.append(f"[Dashboard]({bot.grafana.dashboard_url(cfg.default_dashboard_uid)})")
-        e.add_field(name="Links", value=" · ".join(links), inline=False)
+        links = []
+        if prom is not None:
+            links.append(f"[Prometheus]({prom.base_url})")
+        if am is not None:
+            links.append(f"[Alertmanager]({am.base_url})")
+        if grafana is not None:
+            links.append(f"[Grafana]({grafana.base_url})")
+            uid = getattr(getattr(self.owner("grafana"), "cfg", cfg), "default_dashboard_uid", None)
+            if uid:
+                links.append(f"[Dashboard]({grafana.dashboard_url(uid)})")
+        if links:
+            e.add_field(name="Links", value=" · ".join(links), inline=False)
         return e
 
     @tasks.loop(seconds=60)

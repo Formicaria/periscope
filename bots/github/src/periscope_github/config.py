@@ -28,6 +28,7 @@ class GithubSettings:
     token: str | None = None
     feed_channel_id: int | None = None
     ci_channel_id: int | None = None
+    mirror_to_feed: bool = False
     repo_channel_map: dict[str, int] = field(default_factory=dict)
     events: list[str] = field(default_factory=list)  # empty = all
     ignore_bots: bool = False
@@ -44,6 +45,7 @@ class GithubSettings:
             token=env("GITHUB_TOKEN"),
             feed_channel_id=env_int("GITHUB_FEED_CHANNEL_ID"),
             ci_channel_id=env_int("GITHUB_CI_CHANNEL_ID"),
+            mirror_to_feed=env_bool("GITHUB_MIRROR_TO_FEED", False),
             repo_channel_map=parse_channel_map(env_list("GITHUB_REPO_CHANNEL_MAP")),
             events=[e.lower() for e in env_list("GITHUB_EVENTS")],
             ignore_bots=env_bool("GITHUB_IGNORE_BOTS", False),
@@ -61,25 +63,36 @@ class GithubSettings:
 
     CI_EVENTS = ("workflow_run", "check_run", "check_suite", "workflow_job")
 
-    def channels_for(self, repo_name: str, event: str, default: int | None) -> list[int]:
-        """Every channel an event should be posted to.
-
-        CI events go to GITHUB_CI_CHANNEL_ID (else the feed). Everything else goes to the feed channel,
-        plus a per-repo channel from GITHUB_REPO_CHANNEL_MAP when one matches (exact name, then glob).
-        """
-        feed = self.feed_channel_id or default
-        if event in self.CI_EVENTS:
-            target = self.ci_channel_id or feed
-            return [target] if target else []
-        out: list[int] = [feed] if feed else []
+    def _mapped(self, repo_name: str) -> int | None:
         mapped = self.repo_channel_map.get(repo_name)
         if mapped is None:
             for pattern, cid in self.repo_channel_map.items():
                 if any(ch in pattern for ch in "*?[") and fnmatch.fnmatchcase(repo_name, pattern):
-                    mapped = cid
-                    break
-        if mapped and mapped not in out:
+                    return cid
+        return mapped
+
+    def channels_for(self, repo_name: str, event: str, default: int | None) -> list[int]:
+        """Every channel an event should be posted to.
+
+        A repo with its own channel (GITHUB_REPO_CHANNEL_MAP) gets everything there — commits, PRs,
+        releases and its CI trains. Repos without one fall back to the feed channel (CI results to
+        GITHUB_CI_CHANNEL_ID when set). With GITHUB_MIRROR_TO_FEED=true mapped repos also post to the feed.
+        """
+        feed = self.feed_channel_id or default
+        mapped = self._mapped(repo_name)
+        if event in self.CI_EVENTS:
+            target = mapped or self.ci_channel_id or feed
+            out = [target] if target else []
+            if mapped and self.mirror_to_feed and self.ci_channel_id and self.ci_channel_id != mapped:
+                out.append(self.ci_channel_id)
+            return out
+        out: list[int] = []
+        if mapped:
             out.append(mapped)
+            if self.mirror_to_feed and feed and feed != mapped:
+                out.append(feed)
+        elif feed:
+            out.append(feed)
         return out
 
     def channel_for(self, repo_name: str, default: int | None) -> int | None:

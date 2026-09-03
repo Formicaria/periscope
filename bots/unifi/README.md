@@ -77,30 +77,7 @@ A read-only user is enough for the status board, alerts, and every read command.
 
 ### 3. Configure
 
-```bash
-periscope init unifi
-nano bots/unifi/.env    # fill in DISCORD_TOKEN, GUILD_ID, channel ids, UNIFI_URL, UNIFI_USER, UNIFI_PASS
-```
-
-Pick `UNIFI_URL` / `UNIFI_IS_UNIFI_OS` for your setup:
-
-| You have | `UNIFI_URL` | `UNIFI_IS_UNIFI_OS` |
-|---|---|---|
-| UDM / UDM Pro / UDR / UCG / Cloud Key Gen2+ | `https://192.168.1.1` (no port) | `true` |
-| Self-hosted controller (Docker, VM, Cloud Key Gen1) | `https://host:8443` | `false` |
-
-### 4. Run
-
-From the periscope checkout (see the [pack README](../../README.md) for install):
-
-```bash
-periscope init unifi          # creates bots/unifi/.env
-nano bots/unifi/.env          # paste the values from the steps above
-periscope enable unifi
-periscope logs unifi          # look for "ready as ... (lab=my-lab)" and "synced N app commands"
-```
-
-Docker instead: `docker compose up -d unifi` from the repo root uses the same `bots/unifi/.env`.
+Open the web UI (`periscope web`) → **unifi** → fill in the values from the steps above → **Test** → **Save** → enable. From a terminal: `periscope config unifi KEY=VALUE …` then `periscope enable unifi`; `periscope check unifi` runs the same test.
 
 ## Environment variables
 

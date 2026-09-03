@@ -1,0 +1,15 @@
+[Unit]
+Description=periscope — homelab monitoring bots for Discord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__DIR__
+Environment=PERISCOPE_ROOT=__DIR__
+ExecStart=__DIR__/venv/bin/python -m periscope
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+{% if oob %}<div id="toasts" class="toast toast-end z-50" hx-swap-oob="beforeend">{% endif %}
+{% for level, message in flashes %}
+<div class="alert {{ {'success': 'alert-success', 'error': 'alert-error', 'warning': 'alert-warning'}.get(level, 'alert-info') }} shadow-lg text-sm py-2 px-3 max-w-md" role="status">
+  <span>{{ message }}</span>
+</div>
+{% endfor %}
+{% if oob %}</div>{% endif %}

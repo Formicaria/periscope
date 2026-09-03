@@ -1,10 +1,11 @@
-"""/arr nowplaying (Plex + Jellyfin) and the live status board."""
+"""/arr nowplaying (Plex + Jellyfin) and the live "Media stack" status board, one per media hub."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Literal
 
 import discord
 from discord.ext import commands, tasks
@@ -15,6 +16,8 @@ from ..client import note_reachability
 from . import register
 
 log = logging.getLogger(__name__)
+
+MediaServer = Literal["plex", "jellyfin"]
 
 
 @dataclass
@@ -89,11 +92,14 @@ def sum_diskspace(entries: list[dict]) -> tuple[float, float]:
 class Media(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.svc = bot.svc
-        self.board = StatusBoard(bot, key="arr")
+        self.hub = bot.media_hub
+        self.hub.media_cog = self
+        self.svc = self.hub.svc
+        self.board = StatusBoard(self.hub.board_host, key="arr")
         self.view = RefreshView(self.build_board, custom_id="periscope_arr:refresh")
         bot.add_view(self.view)
-        register(bot, ("nowplaying", "Who is watching what on Plex / Jellyfin", self.nowplaying))
+        if not self.hub.split:  # v1: under /arr; v2: the hub builds /plex nowplaying, /jellyfin nowplaying, /<app> board
+            register(bot, ("nowplaying", "Who is watching what on Plex / Jellyfin", self.nowplaying))
         self.status_loop.change_interval(seconds=bot.settings.status_interval_s)
         self.status_loop.start()
 
@@ -102,17 +108,17 @@ class Media(commands.Cog):
 
     # ----- streams ---------------------------------------------------------------------
 
-    async def _streams(self) -> tuple[list[Stream], list[str]]:
+    async def _streams(self, server: str | None = None) -> tuple[list[Stream], list[str]]:
         streams: list[Stream] = []
         errors: list[str] = []
-        if self.svc.plex:
+        if self.svc.plex and server in (None, "plex"):
             try:
                 streams += [parse_plex_session(m) for m in await self.svc.plex.sessions()]
                 await note_reachability(self.bot, "plex", True)
             except Exception as e:
                 errors.append(f"plex: {e}")
                 await note_reachability(self.bot, "plex", False, str(e))
-        if self.svc.jellyfin:
+        if self.svc.jellyfin and server in (None, "jellyfin"):
             try:
                 for s in await self.svc.jellyfin.sessions():
                     st = parse_jellyfin_session(s)
@@ -124,19 +130,28 @@ class Media(commands.Cog):
                 await note_reachability(self.bot, "jellyfin", False, str(e))
         return streams, errors
 
-    async def nowplaying(self, interaction: discord.Interaction):
-        if not self.svc.plex and not self.svc.jellyfin:
-            await interaction.response.send_message("🚫 No media server configured (PLEX_URL / JELLYFIN_URL).",
-                                                    ephemeral=True)
+    @discord.app_commands.describe(server="Limit to one media server (default: both)")
+    async def nowplaying(self, interaction: discord.Interaction, server: MediaServer | None = None):
+        plex = self.svc.plex if server in (None, "plex") else None
+        jellyfin = self.svc.jellyfin if server in (None, "jellyfin") else None
+        if not plex and not jellyfin:
+            msg = (f"🚫 {server} is not configured (set {server.upper()}_URL)." if server
+                   else "🚫 No media server configured (PLEX_URL / JELLYFIN_URL).")
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         await interaction.response.defer()
-        streams, errors = await self._streams()
+        streams, errors = await self._streams(server)
         body = "\n\n".join(s.line() for s in streams) or "Nobody is watching anything right now."
         if errors:
             body += "\n\n" + "\n".join(f"🔴 {truncate(e, 150)}" for e in errors)
         e = lab_embed(f"Now playing · {len(streams)} stream{'s' if len(streams) != 1 else ''}", truncate(body, 4000),
                       severity=Severity.CRITICAL if errors else Severity.INFO, lab_name=self.bot.lab_name)
         await interaction.followup.send(embed=e)
+
+    async def board_cmd(self, interaction: discord.Interaction):
+        """The shared Media stack board on demand (v2: `/<service> board`)."""
+        await interaction.response.defer()
+        await interaction.followup.send(embed=await self.build_board())
 
     # ----- status board ----------------------------------------------------------------
 

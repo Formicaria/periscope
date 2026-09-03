@@ -110,14 +110,7 @@ URLs may omit the scheme (`sonarr:8989` → `http://sonarr:8989`). Use Docker se
 
 From the periscope checkout (see the [pack README](../../README.md) for install):
 
-```bash
-periscope init arr          # creates bots/arr/.env
-nano bots/arr/.env          # paste the values from steps 1–2
-periscope enable arr
-periscope logs arr          # look for "ready as ... (lab=my-lab)" and "synced N app commands"
-```
-
-Docker instead: `docker compose up -d arr` from the repo root uses the same `bots/arr/.env`.
+Open the web UI (`periscope web`) → **arr** → fill in the values from the steps above → **Test** → **Save** → enable. From a terminal: `periscope config arr KEY=VALUE …` then `periscope enable arr`; `periscope check arr` runs the same test.
 
 ## Alert fingerprints
 

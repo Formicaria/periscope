@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Restarting{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto mt-16 text-center space-y-4">
+  <span class="loading loading-ring loading-lg text-primary"></span>
+  <h2 class="text-xl font-semibold">Restarting periscope</h2>
+  <p class="text-sm opacity-70">The process re-executes in {{ delay }} s; every presence reconnects to Discord. This page reloads when the UI is back.</p>
+  <p class="text-xs opacity-50">Configuration changes apply on restart.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var start = Date.now();
+    function poll() {
+      fetch('/healthz', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+        // a small uptime means the new process answered
+        if (j && j.uptime_s < 30 && Date.now() - start > 3000) { window.location = '/'; return; }
+        setTimeout(poll, 1500);
+      }).catch(function () { setTimeout(poll, 1500); });
+    }
+    setTimeout(poll, 3000);
+  })();
+</script>
+{% endblock %}

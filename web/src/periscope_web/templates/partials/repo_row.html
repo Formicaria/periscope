@@ -1,0 +1,15 @@
+<tr>
+  <td><input name="repo" value="{{ repo }}" class="input input-bordered input-sm mono w-full" placeholder="repo name or glob"></td>
+  <td>
+    {% if channels %}
+    <select name="channel" class="select select-bordered select-sm w-full">
+      <option value="">— pick a channel —</option>
+      {% if cid and cid not in channels | map(attribute='id') | list %}<option value="{{ cid }}" selected>{{ cid }} (not found)</option>{% endif %}
+      {% for c in channels %}<option value="{{ c.id }}" {% if c.id == cid %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+    </select>
+    {% else %}
+    <input name="channel" value="{{ cid }}" class="input input-bordered input-sm mono w-full" placeholder="channel id">
+    {% endif %}
+  </td>
+  <td><button type="button" class="btn btn-ghost btn-xs" onclick="this.closest('tr').remove()" title="remove rule">✕</button></td>
+</tr>

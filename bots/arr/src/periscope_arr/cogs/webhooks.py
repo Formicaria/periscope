@@ -146,12 +146,25 @@ def parse_event(app: str, p: dict) -> WebhookEvent:
 
 
 class Webhooks(commands.Cog):
+    """One POST /<app> route per *arr app on the shared webhook server; events go out through the service
+    that owns the app (its feed channel, its alert router)."""
+
     def __init__(self, bot):
         self.bot = bot
+        self.hub = bot.media_hub
+        self.hub.webhooks_cog = self
+        self.routes: set[str] = set()
         if bot.webhook is None:
             raise RuntimeError("Webhooks cog requires the webhook server (LabBot(webhook=True))")
-        for app in APPS:
-            bot.webhook.add_route("POST", f"/{app}", self._make_handler(app))
+        for app in self.hub.webhook_apps():
+            self.ensure_route(app)
+
+    def ensure_route(self, app: str) -> None:
+        """Register POST /<app> once; the hub calls this again for apps that join later (v2)."""
+        if app not in APPS or app in self.routes:
+            return
+        self.bot.webhook.add_route("POST", f"/{app}", self._make_handler(app))
+        self.routes.add(app)
 
     def _make_handler(self, app: str):
         async def handler(request: web.Request) -> web.Response:
@@ -169,25 +182,27 @@ class Webhooks(commands.Cog):
         return handler
 
     async def handle(self, ev: WebhookEvent) -> None:
+        alerts = self.hub.alerts_for(ev.app)
         if ev.event_type == "HealthIssue":
-            await self.bot.alerts.fire(Alert(fingerprint=ev.health_fingerprint, title=ev.title,
-                                             description=ev.description, severity=ev.severity, fields=ev.fields))
+            await alerts.fire(Alert(fingerprint=ev.health_fingerprint, title=ev.title,
+                                    description=ev.description, severity=ev.severity, fields=ev.fields))
             return
         if ev.event_type == "HealthRestored":
-            if not await self.bot.alerts.resolve(ev.health_fingerprint, note="Reported healthy by the app"):
+            if not await alerts.resolve(ev.health_fingerprint, note="Reported healthy by the app"):
                 await self._post(ev)
             return
         await self._post(ev)
 
     async def _post(self, ev: WebhookEvent) -> None:
-        cid = self.bot.cfg.media_channel_id or self.bot.settings.alert_channel_id
+        owner = self.hub.bot_for(ev.app)
+        cid = self.hub.media_channel_for(ev.app)
         if not cid:
             log.warning("MEDIA_CHANNEL_ID / ALERT_CHANNEL_ID not set; dropping %s event", ev.event_type)
             return
-        ch = await self.bot.get_channel_safe(cid)
+        ch = await owner.get_channel_safe(cid)
         if ch is None:
             return
-        e = lab_embed(ev.title, truncate(ev.description, 2000) or None, severity=ev.severity, lab_name=self.bot.lab_name)
+        e = lab_embed(ev.title, truncate(ev.description, 2000) or None, severity=ev.severity, lab_name=owner.lab_name)
         if ev.poster:
             e.set_thumbnail(url=ev.poster)
         for k, v in ev.fields.items():

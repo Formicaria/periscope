@@ -1,0 +1,6 @@
+{% if url %}
+<a href="{{ url }}" target="_blank" rel="noopener" class="link link-primary">invite link</a>
+<div class="mono opacity-50 text-[10px]">app {{ app_id }}</div>
+{% else %}
+<span class="opacity-50">{{ why or 'unavailable' }}</span>
+{% endif %}

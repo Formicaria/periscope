@@ -76,7 +76,7 @@ async def test_pipeline(tmp_path):
     d.cfg.ignore_bots = True
     assert await d.dispatch("star", star("dependabot[bot]"), delivery_id="d2b") is False  # ... unless filtered
     d.cfg.ignore_bots = False
-    assert len(bot.channels[123].sent) == 2 and len(bot.channels[1].sent) == 2  # feed + repo mirror, both stars
+    assert len(bot.channels[123].sent) == 2 and not bot.channels[1].sent  # mapped repo → its channel only
     assert d.activity_summary() == {"star": 2}
     assert len(d.recent()) == 2 and "starred by alice" in d.recent()[1]
 

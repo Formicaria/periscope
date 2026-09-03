@@ -1,0 +1,37 @@
+# periscope web UI
+
+Admin pages + JSON API served **inside the periscope runtime** (`python -m periscope`) on `web.port`
+(default `:8090`, see `config/periscope.yaml`). Server-rendered Jinja templates, HTMX partial swaps,
+Tailwind + daisyUI from a CDN — no Node, no build step.
+
+```
+./venv/bin/pip install -e web        # setup.sh / update.sh do this
+periscope web                        # prints the URL
+```
+
+## Sign-in
+
+Discord OAuth2. Allowed = members of the lab guild holding any of `web.allowed_role_ids`
+(defaulting to `lab.admin_role_ids`; when both are empty, the guild owner). The Discord application needs
+`<base_url>/auth/callback` as a redirect URL (developer portal → OAuth2).
+
+First run: while `web.oauth_client_id` is empty the login page shows a setup form that accepts the
+**setup token** printed in the runtime log at startup (`web UI setup token: …`), stores the OAuth client
+id/secret + base URL and signs you in as bootstrap admin. `PERISCOPE_WEB_NOAUTH=1` disables the sign-in
+entirely for local development (loud warning in the log).
+
+## Pages
+
+| path | what |
+|---|---|
+| `/` | every service as a card (state, presence, last error) with Enable / Disable / Test / Restart |
+| `/services/<name>` | the service's typed settings as a form; Test runs `check()` on the submitted values |
+| `/presences` | bot identities: tokens, invite links, which services post through which |
+| `/discord` | lab settings, web sign-in settings, channel layout (create missing, apply git/op permissions) |
+| `/routing` | GitHub repo → channel map, feed / CI catch-alls, per-service alert routing |
+| `/logs` | live log tail (SSE), filter by service, download |
+| `/setup` | first-run flow: token → invite → pick server → channel layout → add services |
+| `/api/status`, `/api/config`, `/healthz` | JSON (secrets masked) |
+
+Config edits are written to `config/periscope.yaml` and apply on the next restart (the header shows
+a "restart to apply" banner; Restart re-executes the process after one second).

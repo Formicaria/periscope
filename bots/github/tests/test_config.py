@@ -36,10 +36,12 @@ def test_full_env(monkeypatch):
 
 def test_channel_routing():
     s = GithubSettings(feed_channel_id=1, repo_channel_map={"anthill": 123, "op-*": 789})
-    assert s.channel_for("anthill", None) == 1            # the feed always comes first
-    assert s.channels_for("anthill", "push", None) == [1, 123]
-    assert s.channels_for("op-microround", "push", None) == [1, 789]
-    assert s.channels_for("other", "push", None) == [1]
+    assert s.channels_for("anthill", "push", None) == [123]          # a mapped repo lives in its own channel
+    assert s.channels_for("anthill", "workflow_run", None) == [123]  # CI included
+    assert s.channels_for("op-microround", "push", None) == [789]
+    assert s.channels_for("other", "push", None) == [1]              # unmapped → catch-all feed
+    s.mirror_to_feed = True
+    assert s.channels_for("anthill", "push", None) == [123, 1]
     assert GithubSettings().channel_for("other", 42) == 42
     assert GithubSettings().channel_for("other", None) is None
 
@@ -63,10 +65,11 @@ def test_poll_needs_token(monkeypatch):
 def test_channels_for_feed_gets_everything_and_ci_goes_to_ci_channel():
     from periscope_github.config import GithubSettings
     s = GithubSettings(feed_channel_id=1, ci_channel_id=2, repo_channel_map={"Anthill": 10, "op-*": 20})
-    assert s.channels_for("Anthill", "push", None) == [1, 10]        # feed + mirror
-    assert s.channels_for("op-thing", "issues", None) == [1, 20]     # glob mirror
+    assert s.channels_for("Anthill", "push", None) == [10]
+    assert s.channels_for("op-thing", "issues", None) == [20]        # glob
     assert s.channels_for("other", "push", None) == [1]
-    assert s.channels_for("Anthill", "workflow_run", None) == [2]    # CI never mirrors
+    assert s.channels_for("Anthill", "workflow_run", None) == [10]   # CI goes with its repo
+    assert s.channels_for("other", "workflow_run", None) == [2]      # unmapped CI → CI catch-all
     s2 = GithubSettings(feed_channel_id=1)
     assert s2.channels_for("x", "workflow_run", None) == [1]         # CI falls back to feed
     assert GithubSettings().channels_for("x", "push", 99) == [99]    # alert channel as last resort

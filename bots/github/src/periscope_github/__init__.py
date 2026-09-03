@@ -2,8 +2,10 @@
 
 from .config import GithubSettings
 
-__all__ = ["GithubSettings", "build_bot"]
+__all__ = ["GithubSettings", "COGS", "build_bot"]
 __version__ = "1.0.0"
+
+COGS = ["periscope_github.cogs.events", "periscope_github.cogs.commands", "periscope_github.cogs.poller"]
 
 
 def build_bot(settings=None, gh_settings=None):
@@ -14,8 +16,7 @@ def build_bot(settings=None, gh_settings=None):
 
     settings = settings or Settings.from_env()
     gh_settings = gh_settings or GithubSettings.from_env()
-    cogs = ["periscope_github.cogs.events", "periscope_github.cogs.commands", "periscope_github.cogs.poller"]
-    bot = LabBot(settings, cogs=cogs, webhook=True, description="GitHub org feed")
+    bot = LabBot(settings, cogs=COGS, webhook=True, description="GitHub org feed")
     bot.gh_settings = gh_settings
     bot.gh_client = GithubClient(gh_settings)
     return bot

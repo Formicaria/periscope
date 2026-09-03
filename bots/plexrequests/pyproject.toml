@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "periscope_plexrequests"
+version = "1.0.0"
+description = "periscope service for Plex: library invites, movie/TV requests via Overseerr or Radarr/Sonarr, live status board, new-on-Plex feed, auto-revoke."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "periscope>=1.0",
+    "discord.py>=2.4,<3",
+    "aiohttp>=3.9,<4",
+    "plexapi>=4.16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

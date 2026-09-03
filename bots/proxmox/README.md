@@ -127,7 +127,7 @@ The last command prints a table — the secret is shown **once**:
 │ value        │ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx │   → PVE_TOKEN_SECRET
 ```
 
-Lost it? `pveum user token remove periscope@pve discord`, then re-run the last command. `periscope init proxmox` prints these same commands and checks the token against `/api2/json/version` before saving it.
+Lost it? `pveum user token remove periscope@pve discord`, then re-run the last command. The proxmox page in the web UI (and `periscope check proxmox`) verifies the token against `/api2/json/version`.
 
 - `VM.Audit`, `Datastore.Audit`, `Sys.Audit` are enough for monitoring, task history and backup logs.
 - `VM.PowerMgmt` is only needed for `/pve start|stop|shutdown|reboot`; drop it for a read-only bot (the commands will then fail with a permission error from PVE).
@@ -137,14 +137,7 @@ Lost it? `pveum user token remove periscope@pve discord`, then re-run the last c
 
 From the periscope checkout (see the [pack README](../../README.md) for install):
 
-```bash
-periscope init proxmox          # creates bots/proxmox/.env
-nano bots/proxmox/.env          # paste the values from steps 1–2
-periscope enable proxmox
-periscope logs proxmox          # look for "ready as ... (lab=my-lab)" and "synced N app commands"
-```
-
-Docker instead: `docker compose up -d proxmox` from the repo root uses the same `bots/proxmox/.env`.
+Open the web UI (`periscope web`) → **proxmox** → fill in the values from the steps above → **Test** → **Save** → enable. From a terminal: `periscope config proxmox KEY=VALUE …` then `periscope enable proxmox`; `periscope check proxmox` runs the same test.
 
 ## How it works
 

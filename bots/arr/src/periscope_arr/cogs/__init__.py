@@ -1,4 +1,8 @@
-"""Shared `/arr` command group. Each cog registers its bound methods as subcommands."""
+"""Shared `/arr` command group (v1). Each cog registers its bound methods as subcommands.
+
+Under v2 the media hub builds one group per service instead (`/sonarr`, `/plex`, …, see `periscope_arr.hub`)
+and the cogs skip this registration.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,9 @@
-"""Integration-specific settings for periscope-arr. A service is enabled iff its URL is set."""
+"""Integration-specific settings for periscope-arr. A service is enabled iff its URL is set.
+
+v1 runs the whole media stack as one bot (`from_env()` reads every key, at least one URL must be set).
+v2 hosts each app as its own service: `from_env(only="sonarr")` reads that service's keys plus the shared
+behaviour keys (VERIFY_SSL, MEDIA_CHANNEL_ID, ARR_QUEUE_STALL_MIN) and requires its URL.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,20 @@ from periscope import env, env_bool, env_int
 
 ARR_APPS = ("sonarr", "radarr", "lidarr", "prowlarr")
 ARR_API_VERSION = {"sonarr": "v3", "radarr": "v3", "lidarr": "v1", "prowlarr": "v1"}
+
+# every media service and the env keys it owns (URL first, then its credential(s))
+SERVICE_KEYS: dict[str, tuple[str, ...]] = {
+    "sonarr": ("SONARR_URL", "SONARR_API_KEY"),
+    "radarr": ("RADARR_URL", "RADARR_API_KEY"),
+    "lidarr": ("LIDARR_URL", "LIDARR_API_KEY"),
+    "prowlarr": ("PROWLARR_URL", "PROWLARR_API_KEY"),
+    "qbittorrent": ("QBIT_URL", "QBIT_API_KEY", "QBIT_USER", "QBIT_PASS"),
+    "sabnzbd": ("SABNZBD_URL", "SABNZBD_API_KEY"),
+    "plex": ("PLEX_URL", "PLEX_TOKEN"),
+    "jellyfin": ("JELLYFIN_URL", "JELLYFIN_API_KEY"),
+}
+MEDIA_SERVICES = tuple(SERVICE_KEYS)
+SHARED_KEYS = ("VERIFY_SSL", "MEDIA_CHANNEL_ID", "ARR_QUEUE_STALL_MIN")
 
 
 def _norm_url(url: str | None) -> str | None:
@@ -37,9 +56,15 @@ class ArrSettings:
     queue_stall_min: int = 30
 
     @classmethod
-    def from_env(cls) -> "ArrSettings":
+    def from_env(cls, *, only: str | None = None) -> "ArrSettings":
+        if only is not None and only not in SERVICE_KEYS:
+            raise ValueError(f"unknown media service {only!r}")
+        want = MEDIA_SERVICES if only is None else (only,)
+
         arr: dict[str, tuple[str, str]] = {}
         for app in ARR_APPS:
+            if app not in want:
+                continue
             url = _norm_url(env(f"{app.upper()}_URL"))
             key = env(f"{app.upper()}_API_KEY")
             if url and not key:
@@ -47,25 +72,25 @@ class ArrSettings:
             if url:
                 arr[app] = (url, key)
 
-        sab_url = _norm_url(env("SABNZBD_URL"))
-        sab_key = env("SABNZBD_API_KEY")
-        if sab_url and not sab_key:
-            raise RuntimeError("SABNZBD_URL is set but SABNZBD_API_KEY is missing")
-        plex_url = _norm_url(env("PLEX_URL"))
-        plex_token = env("PLEX_TOKEN")
-        if plex_url and not plex_token:
-            raise RuntimeError("PLEX_URL is set but PLEX_TOKEN is missing")
-        jf_url = _norm_url(env("JELLYFIN_URL"))
-        jf_key = env("JELLYFIN_API_KEY")
-        if jf_url and not jf_key:
-            raise RuntimeError("JELLYFIN_URL is set but JELLYFIN_API_KEY is missing")
+        def pair(name: str, url_key: str, secret_key: str) -> tuple[str | None, str | None]:
+            if name not in want:
+                return None, None
+            url, secret = _norm_url(env(url_key)), env(secret_key)
+            if url and not secret:
+                raise RuntimeError(f"{url_key} is set but {secret_key} is missing")
+            return url, secret
+
+        sab_url, sab_key = pair("sabnzbd", "SABNZBD_URL", "SABNZBD_API_KEY")
+        plex_url, plex_token = pair("plex", "PLEX_URL", "PLEX_TOKEN")
+        jf_url, jf_key = pair("jellyfin", "JELLYFIN_URL", "JELLYFIN_API_KEY")
+        qbit = "qbittorrent" in want
 
         cfg = cls(
             arr=arr,
-            qbit_url=_norm_url(env("QBIT_URL")),
-            qbit_user=env("QBIT_USER", "") or "",
-            qbit_pass=env("QBIT_PASS", "") or "",
-            qbit_api_key=env("QBIT_API_KEY", "") or "",
+            qbit_url=_norm_url(env("QBIT_URL")) if qbit else None,
+            qbit_user=(env("QBIT_USER", "") or "") if qbit else "",
+            qbit_pass=(env("QBIT_PASS", "") or "") if qbit else "",
+            qbit_api_key=(env("QBIT_API_KEY", "") or "") if qbit else "",
             sabnzbd_url=sab_url,
             sabnzbd_api_key=sab_key,
             plex_url=plex_url,
@@ -76,11 +101,14 @@ class ArrSettings:
             media_channel_id=env_int("MEDIA_CHANNEL_ID"),
             queue_stall_min=env_int("ARR_QUEUE_STALL_MIN", 30),
         )
-        if not cfg.enabled_services():
-            raise RuntimeError(
-                "No services configured. Set at least one of SONARR_URL, RADARR_URL, LIDARR_URL, "
-                "PROWLARR_URL, QBIT_URL, SABNZBD_URL, PLEX_URL, JELLYFIN_URL."
-            )
+        if only is None:
+            if not cfg.enabled_services():
+                raise RuntimeError(
+                    "No services configured. Set at least one of SONARR_URL, RADARR_URL, LIDARR_URL, "
+                    "PROWLARR_URL, QBIT_URL, SABNZBD_URL, PLEX_URL, JELLYFIN_URL."
+                )
+        elif only not in cfg.enabled_services():
+            raise RuntimeError(f"{SERVICE_KEYS[only][0]} is required")
         return cfg
 
     def enabled_services(self) -> list[str]:
@@ -90,3 +118,8 @@ class ArrSettings:
             if url:
                 names.append(name)
         return names
+
+    def shared_only(self) -> "ArrSettings":
+        """Just the behaviour keys, no clients — what a MediaHub keeps as its own defaults."""
+        return ArrSettings(verify_ssl=self.verify_ssl, media_channel_id=self.media_channel_id,
+                           queue_stall_min=self.queue_stall_min)

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-center gap-3 mb-6">
+  <div class="stats stats-horizontal bg-base-200 shadow-sm">
+    <div class="stat py-2 px-4"><div class="stat-title text-xs">running</div><div class="stat-value text-xl">{{ counts.running }}</div></div>
+    <div class="stat py-2 px-4"><div class="stat-title text-xs">enabled</div><div class="stat-value text-xl">{{ counts.enabled }}</div></div>
+    <div class="stat py-2 px-4"><div class="stat-title text-xs">problems</div><div class="stat-value text-xl {% if counts.problems %}text-warning{% endif %}">{{ counts.problems }}</div></div>
+  </div>
+  <div class="flex flex-wrap gap-2 text-sm">
+    {% for pname, p in presences.items() %}
+    <span class="badge {{ 'badge-success' if p.connected else 'badge-warning' }} badge-outline gap-1">
+      <span class="mono">{{ pname }}</span>{% if p.user %} · {{ p.user }}{% endif %}
+    </span>
+    {% endfor %}
+    {% if not presences %}<span class="text-sm opacity-60">no presence connected — enable a service and restart</span>{% endif %}
+  </div>
+  {% if dirty %}
+  <div class="alert alert-warning py-2 text-sm w-full">
+    <span>Configuration changed since the runtime started — changes apply on restart.</span>
+  </div>
+  {% endif %}
+</div>
+
+{% for key, title, cards in groups %}
+<section class="mb-8">
+  <h2 class="text-xs uppercase tracking-widest opacity-60 mb-3">{{ title }}</h2>
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    {% for card in cards %}
+    {% include "partials/service_card.html" %}
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% if not groups %}
+<div class="text-sm opacity-60">No service packages are installed — <code class="mono">./venv/bin/pip install -e bots/&lt;name&gt;</code>.</div>
+{% endif %}
+{% endblock %}

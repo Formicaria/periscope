@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, Iterator, Mapping, TypeVar
 
 T = TypeVar("T")
+
+# v2: services run in one process, each with its own settings. While a service is being built the
+# runtime points this at that service's mapping, so every from_env() below reads it instead of os.environ.
+_SOURCE: ContextVar[Mapping[str, str] | None] = ContextVar("periscope_env_source", default=None)
+
+
+@contextlib.contextmanager
+def env_scope(mapping: Mapping[str, str]) -> Iterator[None]:
+    """Make `env()`/`Settings.from_env()` read from `mapping` inside the block."""
+    token = _SOURCE.set(mapping)
+    try:
+        yield
+    finally:
+        _SOURCE.reset(token)
 
 
 def load_dotenv_if_present(path: str | os.PathLike | None = None) -> None:
@@ -20,8 +36,11 @@ def load_dotenv_if_present(path: str | os.PathLike | None = None) -> None:
 
 
 def _raw(name: str) -> str | None:
-    """os.environ lookup that tolerates 'VALUE  # note' — systemd EnvironmentFile keeps inline comments."""
-    raw = os.environ.get(name)
+    """Lookup in the scoped mapping (v2 runtime) or os.environ, tolerating 'VALUE  # note' inline comments."""
+    src = _SOURCE.get()
+    raw = src.get(name) if src is not None else os.environ.get(name)
+    if raw is not None and not isinstance(raw, str):
+        raw = str(raw)
     if raw is None:
         return None
     if raw.lstrip().startswith("#"):
@@ -79,7 +98,8 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        load_dotenv_if_present()
+        if _SOURCE.get() is None:
+            load_dotenv_if_present()
         color = env("LAB_COLOR", "5865F2")
         return cls(
             discord_token=env("DISCORD_TOKEN", required=True),

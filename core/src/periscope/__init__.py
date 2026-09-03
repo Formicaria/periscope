@@ -1,7 +1,7 @@
 """periscope — shared core for the periscope homelab Discord bot pack."""
 
 from .bot import LabBot
-from .config import Settings, env, env_bool, env_int, env_list, load_dotenv_if_present
+from .config import Settings, env, env_bool, env_int, env_list, env_scope, load_dotenv_if_present
 from .embeds import (
     Severity,
     human_bytes,
@@ -18,6 +18,8 @@ from .http import HttpClient
 from .webhook import WebhookServer
 from .state import JsonState
 from .logging import setup_logging
+from .service import Setting, ServiceBot, ServiceSpec, SHARED_SETTINGS, settings_from_example
+from .store import Store
 
 __all__ = [
     "LabBot",
@@ -26,6 +28,7 @@ __all__ = [
     "env_bool",
     "env_int",
     "env_list",
+    "env_scope",
     "load_dotenv_if_present",
     "Severity",
     "human_bytes",
@@ -44,6 +47,12 @@ __all__ = [
     "WebhookServer",
     "JsonState",
     "setup_logging",
+    "Setting",
+    "ServiceBot",
+    "ServiceSpec",
+    "SHARED_SETTINGS",
+    "settings_from_example",
+    "Store",
 ]
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

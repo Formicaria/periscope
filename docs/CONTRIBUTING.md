@@ -20,17 +20,20 @@ periscope/
   bots/<name>/
     src/periscope_<name>/{__main__.py, config.py, client.py, cogs/}
     tests/  .env.example  pyproject.toml  Dockerfile  README.md
-  setup.sh  update.sh  periscope.cli  periscope@.service     # install + CLI + systemd template unit
+  setup.sh  update.sh  periscope.cli  periscope.service      # install + CLI + the one systemd unit
+  web/                                                        # admin UI (FastAPI + HTMX), runs inside the runtime
+  config/periscope.yaml                                       # the whole install's config (0600), edited by UI/CLI
   deploy/lxc-create.sh                                        # PVE one-liner
   docker-compose.yml                                          # secondary deploy path
 ```
-Copy any existing `bots/<name>/`, replace `client.py` + `cogs/`, pick an unused default `WEBHOOK_PORT` in `.env.example`, and add the name to the matrix in both workflows. The systemd template (`periscope@<name>`) and the CLI discover bots from `bots/`, so nothing else needs registering.
+Copy any existing `bots/<name>/`, replace `client.py` + `cogs/`, write `service.py` with `SERVICES = [ServiceSpec(...)]` (see `bots/proxmox/src/periscope_proxmox/service.py`: settings from `.env.example`, `build()` wiring clients + cogs onto the `ServiceBot` facade, `check()` for the UI's Test button), and add the name to the `ci.yml` matrix. The runtime discovers services from every installed `periscope_*` package; the web UI renders their settings automatically.
 
 ## Deploy conventions (same as [displexia](https://github.com/xchronusx/displexia))
 - The repo *is* the install: `git clone` to `/opt/periscope`; each bot's `.env` + `data/` live in `bots/<name>/` (gitignored).
 - `setup.sh` is idempotent: apt deps → one venv → `pip install -e core -e bots/*` → CLI → template unit → enable every bot with a token.
 - `update.sh` = `git pull --ff-only` + reinstall + refresh CLI/unit + restart enabled bots. Never anything destructive.
-- `periscope.cli` / `periscope@.service` use `__DIR__` placeholders; `setup.sh` substitutes the checkout path.
+- `periscope.cli` / `periscope.service` use `__DIR__` placeholders; `setup.sh` substitutes the checkout path.
+- Config changes apply on restart (`periscope restart`, or the button in the UI).
 
 ## Release
 Tag `vX.Y.Z` on `main`; `docker.yml` pushes `ghcr.io/formicaria/periscope-<name>:X.Y.Z` and `:latest` for amd64+arm64.

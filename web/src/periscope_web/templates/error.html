@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto mt-16 text-center space-y-3">
+  <h2 class="text-xl font-semibold">{{ title }}</h2>
+  <p class="text-sm opacity-70">{{ message }}</p>
+  <a href="/" class="btn btn-sm">Back to overview</a>
+</div>
+{% endblock %}

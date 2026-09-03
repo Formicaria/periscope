@@ -7,20 +7,19 @@ import sys
 
 from periscope import LabBot, Settings
 
-from .client import Services
 from .config import ArrSettings
-
-COGS = ["periscope_arr.cogs.webhooks", "periscope_arr.cogs.queue", "periscope_arr.cogs.media"]
+from .hub import COGS, MediaHub
 
 
 class ArrBot(LabBot):
     def __init__(self, settings: Settings, cfg: ArrSettings):
         super().__init__(settings, cogs=COGS, webhook=True, description="*arr / media bot")
         self.cfg = cfg
-        self.svc = Services(cfg)
+        self.media_hub = MediaHub(self, cfg)  # every configured client, one /arr group
+        self.svc = self.media_hub.svc
 
     async def close(self) -> None:
-        await self.svc.close()
+        await self.media_hub.close()
         await super().close()
 
 
