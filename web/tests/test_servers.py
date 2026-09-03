@@ -1,5 +1,6 @@
 """The Discord servers page: several servers on one page, add/remove/default, per-server pickers, a service's
-own server, and the wording sweep (no page still talks about a lab)."""
+own server, which Discord server each card and label actually means, and the wording sweep (no page still talks
+about a lab)."""
 
 from __future__ import annotations
 
@@ -59,6 +60,7 @@ async def test_add_and_remove_a_server_reports_moved_services(client, store, rel
     store.save()
     r = await client.get("/discord")
     assert "Plex land · 77" in r.text                                                # offered: a server the bot is in
+    assert 'data-name="Plex land"' in r.text                                         # picking it fills the name in
     assert "THE LAB · 42" not in r.text                                              # not offered: already on the page
     r = await client.post("/discord/servers", data={"pick": str(GUILD2_ID)}, headers=HX)   # picked, so the name is Discord's
     assert r.status_code == 200 and reload().servers["plex-land"]["name"] == "Plex land"
@@ -123,6 +125,72 @@ async def test_globals_saved_apart_from_the_servers(client, reload):
     assert reload().globals["status_interval_s"] == 45
 
 
+# ----- which Discord server a card is -------------------------------------------------------------------------
+async def test_cards_head_with_the_discord_name_and_the_server_id(client):
+    """A card is headed by the name Discord knows the server by; the stored name is the footer wording only."""
+    r = await client.get("/discord")
+    main = r.text.split('id="server-main"')[1].split('id="server-plex"')[0]
+    plex = r.text.split('id="server-plex"')[1].split('id="server-add"')[0]
+    assert "THE LAB" in main and "42 · main" in main                                 # Discord's name, and which server
+    assert "Plex land" in plex and "77 · plex" in plex
+    assert 'name="name" value="testlab"' in main                                     # the footer name, with its value
+    assert "Name in embed footers" in main and "not what the server is called in Discord" in main
+
+
+async def test_two_servers_with_the_same_footer_name_stay_apart(client, store):
+    """The confusing case: both servers' footers say the same thing, so only Discord's own name tells them apart."""
+    store.servers["main"]["name"] = "ztechnus.com"
+    store.servers["plex"]["name"] = "ztechnus.com"
+    store.save()
+    r = await client.get("/discord")
+    main = r.text.split('id="server-main"')[1].split('id="server-plex"')[0]
+    plex = r.text.split('id="server-plex"')[1].split('id="server-add"')[0]
+    assert "THE LAB" in main and "Plex land" not in main and "42 · main" in main
+    assert "Plex land" in plex and "THE LAB" not in plex and "77 · plex" in plex
+    assert 'value="ztechnus.com"' in main and 'value="ztechnus.com"' in plex         # same footer name on both
+    r = await client.get("/services/pve")                                            # and apart in the dropdown too
+    assert ">ztechnus.com (THE LAB)</option>" in r.text and ">ztechnus.com (Plex land)</option>" in r.text
+
+
+async def test_use_the_discord_name_sets_the_footer_name(client, store, reload):
+    r = await client.get("/discord")
+    main = r.text.split('id="server-main"')[1].split('id="server-plex"')[0]
+    plex = r.text.split('id="server-plex"')[1].split('id="server-add"')[0]
+    assert "use the Discord name" in main                                            # testlab is not what Discord says
+    assert "use the Discord name" not in plex                                        # Plex land is
+    r = await client.post("/discord/servers/main/name", headers=HX)
+    assert r.status_code == 200 and "embed footers now say THE LAB" in r.text
+    assert reload().servers["main"]["name"] == "THE LAB"
+    assert "use the Discord name" not in r.text                                      # nothing left to copy
+    r = await client.post("/discord/servers/ghost/name", headers=HX)
+    assert r.status_code == 404
+    store.add_server("far", "Far away")["guild_id"] = "5150"                         # a server nobody's bot is in
+    store.save()
+    r = await client.post("/discord/servers/far/name", headers=HX)
+    assert r.status_code == 422 and "Discord name is not known" in r.text
+    assert reload().servers["far"]["name"] == "Far away"
+
+
+async def test_every_label_appends_the_discord_name_when_it_differs(client, store):
+    """One helper, used everywhere a server is named: the footer name, plus Discord's when the two differ."""
+    store.services["github"]["server"] = "plex"
+    store.save()
+    r = await client.get("/services/pve")                                            # the "in server" dropdown
+    assert '<option value="main" selected>testlab (THE LAB)</option>' in r.text
+    assert ">Plex land</option>" in r.text and "Plex land (" not in r.text
+    r = await client.get("/")                                                        # the "posts as X in Y" line
+    card = r.text.split('id="card-pve"')[1].split('id="card-')[0]
+    assert "posts as" in card and "testlab (THE LAB)" in card
+    card = r.text.split('id="card-github"')[1].split('id="card-')[0]
+    assert "Plex land" in card and "Plex land (" not in card
+    r = await client.get("/routing")                                                 # the per-row badge
+    assert "testlab (THE LAB)" in r.text.split('id="alert-pve"')[1].split("</tr>")[0]
+    row = r.text.split('id="alert-github"')[1].split("</tr>")[0]
+    assert "Plex land" in row and "Plex land (" not in row
+    r = await client.post("/discord/servers/main", data={"name": "testlab", "guild_id": "42"}, headers=HX)
+    assert r.status_code == 200 and "testlab (THE LAB) saved" in r.text              # and the toast that names one
+
+
 # ----- pickers without a connected bot ------------------------------------------------------------------------
 async def test_pickers_fall_back_to_rest_per_server(client, app, api_calls):
     """No presence connected → each card lists its own server over the REST API, with any bot token."""
@@ -150,8 +218,8 @@ async def test_layout_panel_acts_on_the_chosen_server(client, guild, guild2):
 # ----- a service picks its server -------------------------------------------------------------------------------
 async def test_service_form_saves_its_server_and_uses_it(client, reload):
     r = await client.get("/services/pve")
-    assert 'name="_server"' in r.text and ">Plex land</option>" in r.text
-    assert '<option value="main" selected>testlab</option>' in r.text
+    assert 'name="_server"' in r.text and ">Plex land</option>" in r.text            # Discord calls it that too
+    assert '<option value="main" selected>testlab (THE LAB)</option>' in r.text      # this one it does not
     assert "server default: #lab-alerts" in r.text                                   # main's alert channel
     r = await client.post("/services/pve", data={"_enabled": "true", "_server": "plex", "PVE_URL": "https://pve:8006",
                                                  "PVE_TOKEN_SECRET": ""}, headers=HX)
@@ -223,6 +291,7 @@ async def test_cards_say_when_no_bot_has_a_token(client, store, app):
     app.state.guild.invalidate()
     r = await client.get("/discord")
     assert r.status_code == 200 and r.text.count("No bot has a token yet") == 2      # one line per card
+    assert r.text.count("not visible — no bot token yet") == 2                       # …and no name to head with
     assert 'name="alert_channel_id"' in r.text and "<select name=\"alert_channel_id\"" not in r.text
 
 
@@ -237,3 +306,5 @@ async def test_card_says_when_the_bot_is_not_in_that_server(client, app, store):
     card = r.text.split('id="server-far"')[1]
     assert 'name="status_channel_id"' in card and "<select" not in card.split('name="admin_role_ids"')[0]
     assert "The bot is not in this server" in card and "client_id=999" in card
+    assert "not visible — the bot is not in this server" in card and "5150 · far" in card   # instead of a name
+    assert "use the Discord name" not in card                                               # nothing to copy either

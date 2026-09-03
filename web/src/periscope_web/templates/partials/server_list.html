@@ -13,19 +13,21 @@
         {% if known %}
         <div class="form-control md:col-span-2">
           <label class="label py-1"><span class="label-text text-sm">A server the bot is already in</span></label>
-          <select name="pick" class="select select-bordered select-sm">
-            <option value="">— type a name and id below instead —</option>
-            {% for g in known %}<option value="{{ g.id }}">{{ g.name }} · {{ g.id }}</option>{% endfor %}
+          <select name="pick" class="select select-bordered select-sm" title="the servers a connected bot is in, by their Discord names"
+                  onchange="var o=this.selectedOptions[0];document.getElementById('add-server-name').value=o.dataset.name||'';document.getElementById('add-server-id').value=o.value;">
+            <option value="" data-name="">— type a name and id below instead —</option>
+            {% for g in known %}<option value="{{ g.id }}" data-name="{{ g.name }}">{{ g.name }} · {{ g.id }}</option>{% endfor %}
           </select>
+          <span class="label-text-alt opacity-60 text-xs mt-1">picking one fills in its Discord name and id below; the name is only what embed footers will say, so you can change it</span>
         </div>
         {% endif %}
         <div class="form-control">
-          <label class="label py-1"><span class="label-text text-sm">Name</span></label>
-          <input name="name" class="input input-bordered input-sm" placeholder="shown in embed footers">
+          <label class="label py-1"><span class="label-text text-sm">Name in embed footers</span></label>
+          <input id="add-server-name" name="name" class="input input-bordered input-sm" placeholder="the wording at the bottom of every embed">
         </div>
         <div class="form-control">
           <label class="label py-1"><span class="label-text text-sm">Discord server id</span></label>
-          <input name="guild_id" class="input input-bordered input-sm mono" placeholder="right-click the server → Copy Server ID">
+          <input id="add-server-id" name="guild_id" class="input input-bordered input-sm mono" placeholder="right-click the server → Copy Server ID">
         </div>
       </div>
       <div class="card-actions items-center gap-3 mt-2">

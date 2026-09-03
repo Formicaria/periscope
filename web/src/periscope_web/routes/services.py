@@ -38,7 +38,7 @@ async def _ctx(request: Request, name: str, *, errors: list[str] | None = None) 
         "fix": fix_link(live.get("fix"), name) if enabled else None,
         "presence": store.presence_for(name),
         "presences": [(k, v.get("label") or k, bool(v.get("token"))) for k, v in store.presences.items()],
-        "server": server, "servers": server_options(store),
+        "server": server, "servers": server_options(store, await st.guild.names()),
         "groups": build_fields(spec, env, channels=channels, roles=roles, store=store, server=server),
         "pickers": bool(channels), "errors": errors or [], "live": live,
         "webhook": {"port": store.webhook.get("port"), "paths": spec.webhook_paths, "needs": spec.needs_webhook},

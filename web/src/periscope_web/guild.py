@@ -1,7 +1,8 @@
 """Guild lookups for pickers and layout actions, for any of the configured Discord servers.
 
-One server's channels/roles come from a connected presence that can see it (any of `runtime.presences`, by
-`get_guild`), else from the REST API with any presence's token. Everything is cached per server id for 60 s.
+One server's channels/roles — and its own name in Discord — come from a connected presence that can see it (any
+of `runtime.presences`, by `get_guild`), else from the REST API with any presence's token. Everything is cached
+per server id for 60 s.
 Layout actions need a `discord.Guild`: a connected presence's, else a temporary REST-only discord.py client
 (login + fetch_guild, no gateway session) so the first-run flow works before any service is running.
 """
@@ -146,6 +147,37 @@ class GuildDirectory:
         raw = await self._rest("roles", gid, self.api.guild_roles)
         out = [Role(str(r["id"]), str(r.get("name", "")), int(r.get("color") or 0)) for r in raw if r.get("name") != "@everyone"]
         return sorted(out, key=lambda r: r.name.lower())
+
+    async def guild_name(self, gid: int | None) -> str:
+        """A server's own name in Discord — what the cards head with, so two servers that share a display name
+        can still be told apart. From a connected presence's guild object, else GET /guilds/{id}; "" when no bot
+        is in that server, or when none has a token to ask with."""
+        g = self.guild_for(gid)
+        if g is not None:
+            return str(getattr(g, "name", "") or "")
+        token = self.any_token()
+        if gid is None or not token:
+            return ""
+        hit = self._cache.get(("name", gid))
+        if hit and hit[0] > time.time():
+            return hit[1]
+        try:
+            name = str(((await self.api.guild(token, gid)) or {}).get("name") or "")
+        except Exception as e:  # noqa: BLE001
+            log.warning("guild name lookup for server %s failed: %s", gid, e)
+            name = ""
+        self._cache[("name", gid)] = (time.time() + CACHE_TTL, name)
+        return name
+
+    async def names(self) -> dict[str, str]:
+        """{Discord server id: its real name} for the configured servers — the one lookup a request makes so
+        every label can name the Discord server behind a display name without asking again."""
+        out: dict[str, str] = {}
+        for gid in dict.fromkeys(self.store.guild_ids().values()):
+            name = await self.guild_name(int(gid)) if gid.isdigit() else ""
+            if name:
+                out[gid] = name
+        return out
 
     async def available_guilds(self) -> list[dict[str, str]]:
         """The Discord servers a bot of ours is in — what the "add a server" picker offers. From a connected

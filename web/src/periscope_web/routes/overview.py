@@ -13,6 +13,7 @@ from .. import restart
 from ..forms import merged_env, parse_form
 from ..render import fix_link, flash, is_htmx, partial, redirect, render
 from . import save
+from .servers import server_label
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,8 +23,10 @@ GROUPS = [("infra", "Infrastructure"), ("media", "Media"), ("dev", "Dev")]
 OFF, PENDING, NOT_INSTALLED = "off", "on after restart", "not installed"
 
 
-def service_card(request: Request, name: str, status: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Everything the card partial needs for one service (installed spec and/or configured entry)."""
+def service_card(request: Request, name: str, status: dict[str, Any] | None = None,
+                 names: dict[str, str] | None = None) -> dict[str, Any]:
+    """Everything the card partial needs for one service (installed spec and/or configured entry). `names` is the
+    {Discord server id: real name} map from `st.guild.names()`, so the card can say which server it means."""
     st = request.app.state
     runtime = st.runtime
     store = runtime.store
@@ -36,7 +39,7 @@ def service_card(request: Request, name: str, status: dict[str, Any] | None = No
     pinfo = store.presences.get(presence) or {}
     server = store.server_for(name)
     # the server is only worth a word on the card when there is more than one to choose from
-    server_label = (str(store.servers[server].get("name") or "").strip() or server) if len(store.servers) > 1 else ""
+    label = server_label(server, store.servers[server], names) if len(store.servers) > 1 else ""
     problem: str | None = None
     fix: str | None = None
     if spec is None:
@@ -66,7 +69,7 @@ def service_card(request: Request, name: str, status: dict[str, Any] | None = No
         "group": spec.group if spec else "infra", "slash": spec.slash if spec else "", "installed": spec is not None,
         "state": state, "enabled": enabled, "presence": presence, "presence_user": presence_user,
         "presence_label": pinfo.get("label") or presence, "presence_has_token": bool(pinfo.get("token")),
-        "server": server, "server_label": server_label,
+        "server": server, "server_label": label,
         "has_check": bool(spec and spec.check), "needs_webhook": bool(spec and spec.needs_webhook),
         "webhook_paths": list(spec.webhook_paths) if spec else [],
         "problem": problem, "fix_href": link[0] if link else None, "fix_label": link[1] if link else None,
@@ -91,8 +94,9 @@ async def overview(request: Request):
     if not any(p.get("token") for p in store.presences.values()) and not is_htmx(request):
         return redirect(request, "/setup", 302)
     status = runtime.status()
+    server_names = await st.guild.names()          # one lookup for the whole page, so every card can name its server
     names = list(runtime.specs) + [n for n in store.services if n not in runtime.specs]
-    cards = [service_card(request, n, status) for n in names]
+    cards = [service_card(request, n, status, server_names) for n in names]
     groups = [(key, title, [c for c in cards if c["group"] == key]) for key, title in GROUPS]
     other = [c for c in cards if c["group"] not in {k for k, _ in GROUPS}]
     if other:
@@ -110,9 +114,10 @@ async def overview(request: Request):
                                              "chips": chips, "attention": attention})
 
 
-def _card_response(request: Request, name: str):
+async def _card_response(request: Request, name: str):
     if is_htmx(request):
-        return partial(request, "partials/service_card.html", {"card": service_card(request, name)})
+        card = service_card(request, name, names=await request.app.state.guild.names())
+        return partial(request, "partials/service_card.html", {"card": card})
     return redirect(request, "/")
 
 
@@ -138,7 +143,7 @@ async def enable(request: Request, name: str):
     store.set_enabled(name, True)
     save(request)
     flash(request, f"{spec.title} is on — it starts on the next restart (button in the header)", "success")
-    return _card_response(request, name)
+    return await _card_response(request, name)
 
 
 @router.post("/services/{name}/disable")
@@ -150,7 +155,7 @@ async def disable(request: Request, name: str):
     store.set_enabled(name, False)
     save(request)
     flash(request, f"{name} is off — it stops on the next restart", "info")
-    return _card_response(request, name)
+    return await _card_response(request, name)
 
 
 @router.post("/services/{name}/check")

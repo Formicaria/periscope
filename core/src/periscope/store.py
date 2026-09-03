@@ -60,6 +60,7 @@ class Store:
     def __init__(self, path: str | os.PathLike = DEFAULT_PATH, data: dict[str, Any] | None = None):
         self.path = Path(path)
         self.data: dict[str, Any] = data if data is not None else _blank()
+        self.upgraded = False   # the file was written by an older version and its shape changed on load
 
     # ----- io ------------------------------------------------------------------------------
     @classmethod
@@ -76,8 +77,11 @@ class Store:
                 data[k] = v
         data.setdefault("presences", {})
         data.setdefault("services", {})
+        before = copy.deepcopy({"servers": data.get("servers"), "lab": data.get("lab"), "services": data.get("services")})
         _upgrade_servers(data, had_servers=isinstance(raw.get("servers"), dict) and bool(raw["servers"]))
-        return cls(p, data)
+        store = cls(p, data)
+        store.upgraded = before != {"servers": data.get("servers"), "lab": data.get("lab"), "services": data.get("services")}
+        return store
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -289,11 +293,57 @@ class _LabView(dict):
         return super().pop(key, *default)
 
 
+# a service that names its own Discord server did so with one of these keys before servers existed
+OWN_GUILD_KEYS = ("GUILD_ID", "PLEXREQ_GUILD_ID")
+# what such a service called the server, in order of preference
+OWN_NAME_KEYS = ("SERVER_NAME", "PLEX_NAME", "LAB_NAME")
+
+
+def _slug(text: str, taken: Any) -> str:
+    key = "".join(c if c.isalnum() else "-" for c in str(text).strip().lower()).strip("-")[:32] or "server"
+    out, n = key, 2
+    while out in taken:
+        out, n = f"{key}-{n}", n + 1
+    return out
+
+
+def _split_own_guilds(data: dict[str, Any]) -> None:
+    """Services that carried their own GUILD_ID (the standalone Plex bot did) become servers of their own, so
+    every Discord server periscope posts in is visible on the Discord page instead of hiding in a service's env."""
+    servers: dict[str, dict[str, Any]] = data["servers"]
+    known = {str(v.get("guild_id") or "").strip(): k for k, v in servers.items() if str(v.get("guild_id") or "").strip()}
+    for name, svc in (data.get("services") or {}).items():
+        if not isinstance(svc, dict) or svc.get("server"):
+            continue
+        env = svc.get("env") or {}
+        gid = next((str(env.get(k) or "").strip() for k in OWN_GUILD_KEYS if str(env.get(k) or "").strip()), "")
+        if not gid or not gid.isdigit():
+            continue
+        if gid in known:
+            svc["server"] = known[gid]                      # same server as an existing entry — just point at it
+        else:
+            label = next((str(env[k]).strip() for k in OWN_NAME_KEYS if str(env.get(k) or "").strip()), f"{name} server")
+            key = _slug(label if label != f"{name} server" else name, servers)
+            srv = blank_server(label)
+            srv["guild_id"] = gid
+            for field, env_key in SERVER_KEYS.items():
+                if field in ("name", "guild_id"):
+                    continue
+                if str(env.get(env_key) or "").strip():
+                    srv[field] = env[env_key]
+            servers[key] = srv
+            known[gid] = key
+            svc["server"] = key
+        env.pop("GUILD_ID", None)                            # the server owns it now; the service inherits it
+
+
 def _upgrade_servers(data: dict[str, Any], had_servers: bool = False) -> None:
-    """A config written before multiple servers: its `lab` block becomes the first server."""
+    """A config written before multiple servers: its `lab` block becomes the first server, and any service that
+    named a Discord server of its own becomes a second one."""
     lab = data.get("lab") or {}
     if had_servers:
         data["lab"] = {k: v for k, v in lab.items() if k in GLOBAL_KEYS} or {"log_level": "INFO", "status_interval_s": 60}
+        _split_own_guilds(data)
         return
     srv = blank_server(str(lab.get("name") or "my server"))
     for field in SERVER_KEYS:
@@ -301,6 +351,7 @@ def _upgrade_servers(data: dict[str, Any], had_servers: bool = False) -> None:
             srv[field] = lab[field]
     data["servers"] = {MAIN: srv}
     data["lab"] = {k: lab.get(k, v) for k, v in {"log_level": "INFO", "status_interval_s": 60}.items()}
+    _split_own_guilds(data)
 
 
 SECRET_HINTS = ("TOKEN", "SECRET", "KEY", "PASSWORD", "PASS", "API")

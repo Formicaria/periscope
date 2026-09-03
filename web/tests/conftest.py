@@ -1,7 +1,8 @@
 """Fixtures: a fake Runtime (real Store + real MessageStore + hand-made ServiceSpecs + stub presences with two
 fake guilds), a mocked Discord REST API (httpx.MockTransport) and an httpx client with a signed session cookie.
-The store holds two Discord servers — `main` (guild 42, the default) and `plex` (guild 77). No network, no
-Discord."""
+The store holds two Discord servers — `main` (guild 42, the default) and `plex` (guild 77). Discord calls those
+two "THE LAB" and "Plex land"; `main`'s display name is "testlab" on purpose, so one server's own Discord name
+differs from the name its embed footers carry and the other's matches. No network, no Discord."""
 
 from __future__ import annotations
 
@@ -302,6 +303,8 @@ def discord_handler(calls: list):
                                              {"id": "43", "name": "Other", "owner": False}])
         if path == f"/api/v10/guilds/{GUILD_ID}":
             return httpx.Response(200, json={"id": str(GUILD_ID), "name": "THE LAB", "owner_id": "555"})
+        if path == f"/api/v10/guilds/{GUILD2_ID}":
+            return httpx.Response(200, json={"id": str(GUILD2_ID), "name": "Plex land", "owner_id": "555"})
         if path == f"/api/v10/guilds/{GUILD_ID}/channels":
             return httpx.Response(200, json=[{"id": "10", "name": "LAB", "type": 4}, {"id": "1001", "name": "lab-status", "type": 0, "parent_id": "10"},
                                              {"id": "1002", "name": "lab-alerts", "type": 0, "parent_id": "10"}, {"id": "1003", "name": "git-anthill", "type": 0}])

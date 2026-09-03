@@ -271,3 +271,35 @@ async def test_one_bot_serves_every_server_its_services_use():
     pres.services = [_service(pres, "proxmox", guild_id=42), _service(pres, "plexrequests", guild_id=77)]
     await pres.sync_commands()
     assert sorted(tree.synced) == [42, 77] and pres.missing_guilds == {}
+
+
+def test_upgrade_splits_a_service_that_had_its_own_discord_server(tmp_path):
+    """The live shape before servers existed: the Plex service carried its own GUILD_ID inside its env, so the
+    Discord page only ever showed one server. On load it becomes a server of its own."""
+    p = tmp_path / "config" / "periscope.yaml"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        "version: 2\n"
+        "lab: {name: ztechnus.com, guild_id: '1439', status_channel_id: '111', alert_channel_id: '222', log_level: INFO}\n"
+        "services:\n"
+        "  sonarr: {enabled: true, presence: arr, env: {SONARR_URL: 'https://s'}}\n"
+        "  plexrequests: {enabled: true, presence: plex, env: {GUILD_ID: '1418', PLEXREQ_GUILD_ID: '1418',\n"
+        "    SERVER_NAME: my plex, CHANNEL_ID: '900', ALERT_CHANNEL_ID: '901'}}\n")
+    s = Store.load(p)
+    assert len(s.servers) == 2 and s.server_for("sonarr") == "main"
+    key = s.server_for("plexrequests")
+    assert key != "main" and s.servers[key]["guild_id"] == "1418" and s.servers[key]["name"] == "my plex"
+    assert s.servers[key]["alert_channel_id"] == "901"          # its own channel came along
+    assert s.servers["main"]["guild_id"] == "1439"              # the first server is untouched
+    env = s.env_for("plexrequests")
+    assert env["GUILD_ID"] == "1418" and env["LAB_NAME"] == "my plex" and env["PLEXREQ_GUILD_ID"] == "1418"
+    assert "GUILD_ID" not in s.services["plexrequests"]["env"]  # the server owns it now
+    assert s.env_for("sonarr")["GUILD_ID"] == "1439"
+    # a second service in the same Discord server joins that entry instead of making another
+    s.services["jellyfin"] = {"enabled": True, "presence": "plex", "env": {"GUILD_ID": "1418"}}
+    s.save()
+    s2 = Store.load(p)
+    assert len(s2.servers) == 2 and s2.server_for("jellyfin") == key
+    # and a config that already names its servers is left alone
+    s2.save()
+    assert len(Store.load(p).servers) == 2

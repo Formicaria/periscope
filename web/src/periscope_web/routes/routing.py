@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ..render import flash, is_htmx, partial, redirect, render
 from . import save
+from .servers import server_label
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -72,6 +73,7 @@ async def _alert_rows(request: Request) -> list[dict]:
     runtime = st.runtime
     store = runtime.store
     names = list(runtime.specs) + [n for n in store.services if n not in runtime.specs]
+    server_names = await st.guild.names()           # one lookup for the table: the badges name the Discord server
     per_server: dict[str, tuple[list, list, dict[str, str]]] = {}
     out = []
     for name in names:
@@ -85,7 +87,7 @@ async def _alert_rows(request: Request) -> list[dict]:
         srv = store.server(key)
         out.append({"name": name, "title": spec.title if spec else name, "group": spec.group if spec else "other",
                     "enabled": bool((store.services.get(name) or {}).get("enabled")),
-                    "server": key, "server_label": str(srv.get("name") or "").strip() or key,
+                    "server": key, "server_label": server_label(key, srv, server_names),
                     "channels": channels, "roles": roles, "defaults": defaults,
                     "values": {k: str(env.get(k) or "") for k in ROUTE_KEYS}})
     return out

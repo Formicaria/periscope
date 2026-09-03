@@ -3,8 +3,17 @@
   <div class="card-body p-4 gap-3">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="flex flex-wrap items-center gap-2">
-      <h3 class="text-xs uppercase tracking-widest opacity-60">{{ server.label }}</h3>
-      <span class="mono text-[10px] opacity-40">{{ server.key }}</span>
+      <div class="min-w-0">
+        {% if server.real_name %}
+        <h3 class="card-title text-base leading-tight" title="what this server is called in Discord">{{ server.real_name }}</h3>
+        {% elif server.guild_id %}
+        <h3 class="text-sm font-medium opacity-70" title="nobody's bot can see this server, so Discord's own name for it is unknown">
+          not visible — {% if server.no_token %}no bot token yet{% else %}the bot is not in this server{% endif %}</h3>
+        {% else %}
+        <h3 class="text-sm font-medium opacity-70">no Discord server id yet</h3>
+        {% endif %}
+        <div class="mono text-[10px] opacity-40">{{ server.guild_id or 'no server id' }} · {{ server.key }}</div>
+      </div>
       {% if server.is_default %}
       <span class="badge badge-primary badge-xs" title="new services post here, and this is the server the sign-in gate checks">default</span>
       {% else %}
@@ -16,7 +25,7 @@
         {% if server.can_remove %}
         <button type="button" class="btn btn-ghost btn-xs text-error" hx-post="/discord/servers/{{ server.key }}/delete"
                 hx-target="#servers" hx-swap="outerHTML"
-                hx-confirm="Remove {{ server.label }}?{% if server.services %} {{ server.services | join(', ') }} move to the default server.{% endif %}">remove</button>
+                hx-confirm="Remove {{ server.full_label }}?{% if server.services %} {{ server.services | join(', ') }} move to the default server.{% endif %}">remove</button>
         {% endif %}
       </div>
     </div>
@@ -30,8 +39,16 @@
     {% endif %}
     <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
       <div class="form-control">
-        <label class="label py-1"><span class="label-text text-sm">Server name</span><span class="label-text-alt mono opacity-40 text-[10px]">LAB_NAME</span></label>
-        <input name="name" value="{{ server.name }}" class="input input-bordered input-sm" placeholder="shown in every embed footer">
+        <label class="label py-1"><span class="label-text text-sm">Name in embed footers</span><span class="label-text-alt mono opacity-40 text-[10px]">LAB_NAME</span></label>
+        <input name="name" value="{{ server.name }}" class="input input-bordered input-sm" placeholder="the wording at the bottom of every embed">
+        <span class="label-text-alt opacity-60 text-xs mt-1 flex flex-wrap items-center gap-2">
+          <span>the wording at the bottom of every embed — not what the server is called in Discord</span>
+          {% if server.can_rename %}
+          <button type="button" class="btn btn-ghost btn-xs" hx-post="/discord/servers/{{ server.key }}/name"
+                  hx-target="#server-{{ server.key }}" hx-swap="outerHTML"
+                  title="put {{ server.real_name }} in the footers instead">use the Discord name</button>
+          {% endif %}
+        </span>
       </div>
       <div class="form-control">
         <label class="label py-1"><span class="label-text text-sm">Accent color</span><span class="label-text-alt mono opacity-40 text-[10px]">LAB_COLOR</span></label>

@@ -277,8 +277,12 @@ def load_store(root: Path) -> Store:
         if imported:
             log.info("imported v1 config for: %s", ", ".join(imported))
         store.save()
-    elif store.tidy():
+    elif store.tidy() or store.upgraded:
+        # the file came from an older version: write the shape this one reads, so the UI and the file agree
         store.save()
+        if store.upgraded:
+            log.info("config upgraded: %d Discord server(s) — %s", len(store.servers),
+                     ", ".join(f"{v.get('name') or k} ({v.get('guild_id') or 'no id'})" for k, v in store.servers.items()))
     return store
 
 

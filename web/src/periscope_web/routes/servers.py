@@ -21,13 +21,23 @@ CHANNEL_KEYS = ("status_channel_id", "alert_channel_id")
 
 
 def label_for(key: str, srv: dict) -> str:
-    """What a server is called in a dropdown: its name, or its key when it has none."""
+    """A server's display name — the wording embed footers carry — or its key when it has none."""
     return str(srv.get("name") or "").strip() or key
 
 
-def server_options(store) -> list[tuple[str, str]]:
+def server_label(key: str, srv: dict, names: dict[str, str] | None = None) -> str:
+    """What a server is called everywhere but its own card: the display name, and the real Discord name after it
+    when that is known and different — "ztechnus.com (THE LAB)". Two servers may carry the same display name, so
+    this is what keeps them apart. `names` is {Discord server id: real name}, fetched once per request with
+    `st.guild.names()`; this looks nothing up itself."""
+    label = label_for(key, srv)
+    real = str((names or {}).get(str(srv.get("guild_id") or "").strip()) or "").strip()
+    return f"{label} ({real})" if real and real != label else label
+
+
+def server_options(store, names: dict[str, str] | None = None) -> list[tuple[str, str]]:
     """(key, label) for every configured server — the "in server" pickers elsewhere use this too."""
-    return [(k, label_for(k, v)) for k, v in store.servers.items()]
+    return [(k, server_label(k, v, names)) for k, v in store.servers.items()]
 
 
 def _slug(text: str, taken) -> str:
@@ -39,15 +49,21 @@ def _slug(text: str, taken) -> str:
 
 
 async def _card(request: Request, key: str) -> dict:
-    """One server's card: its stored values as strings, plus the pickers for that very server."""
+    """One server's card: its stored values as strings, plus the pickers and the real Discord name of that very
+    server — the card heads with the name Discord knows it by, not with the display name."""
     st = request.app.state
     store = st.runtime.store
     srv = store.servers[key]
     gid = st.guild.guild_id(key)
     channels, roles = await st.guild.channels_for(gid), await st.guild.roles_for(gid)
+    real_name = await st.guild.guild_name(gid)
+    label = label_for(key, srv)
+    full_label = server_label(key, srv, {str(gid): real_name} if real_name else {})
     listed = bool(channels or roles)
     return {
-        "key": key, "label": label_for(key, srv), "name": str(srv.get("name") or ""), "color": str(srv.get("color") or ""),
+        "key": key, "label": label, "full_label": full_label, "name": str(srv.get("name") or ""),
+        "color": str(srv.get("color") or ""), "real_name": real_name,
+        "can_rename": full_label != label,      # Discord's name is known and is not the one the footers carry
         "guild_id": str(srv.get("guild_id") or ""), "is_default": key == store.default_server(),
         "channels": channels, "roles": roles, "listed": listed,
         "admin_ids": [str(x) for x in (srv.get("admin_role_ids") or [])],
@@ -83,9 +99,10 @@ async def _layout(request: Request, key: str | None = None) -> dict:
     status["available"] = bool(channels) or bool(roles)
     status["can_act"] = gid is not None and bool(st.guild.any_token())
     status["connected"] = st.guild.guild_for(gid) is not None
+    names = await st.guild.names()
     status["server"] = key
-    status["server_label"] = label_for(key, store.servers[key])
-    status["servers"] = server_options(store)
+    status["server_label"] = server_label(key, store.servers[key], names)
+    status["servers"] = server_options(store, names)
     return status
 
 
@@ -109,7 +126,8 @@ async def servers_page(request: Request):
 @router.post("/discord/servers/{key}")
 async def server_save(request: Request, key: str):
     """One server card: display name, accent colour, server id and the channels/roles it posts in."""
-    store = request.app.state.runtime.store
+    st = request.app.state
+    store = st.runtime.store
     if key not in store.servers:
         raise HTTPException(404, f"unknown server {key}")
     srv = store.servers[key]
@@ -143,7 +161,7 @@ async def server_save(request: Request, key: str):
             flash(request, e, "error")
     else:
         save(request)
-        flash(request, f"{label_for(key, srv)} saved — restart to apply", "success")
+        flash(request, f"{server_label(key, srv, await st.guild.names())} saved — restart to apply", "success")
     if is_htmx(request):
         return partial(request, "partials/server_form.html", {"server": await _card(request, key)},
                        status=422 if errors else 200)
@@ -175,24 +193,50 @@ async def server_add(request: Request):
         srv = store.add_server(key, name or key)
         srv["guild_id"] = guild_id
         save(request)
-        flash(request, f"{label_for(key, srv)} added — set its channels below, then restart to apply", "success")
+        label = server_label(key, srv, await st.guild.names())
+        flash(request, f"{label} added — set its channels below, then restart to apply", "success")
     if is_htmx(request):
         return partial(request, "partials/server_list.html", await _list_ctx(request), status=422 if problem else 200)
     return redirect(request, "/discord")
 
 
-@router.post("/discord/servers/{key}/delete")
-async def server_delete(request: Request, key: str):
-    store = request.app.state.runtime.store
+@router.post("/discord/servers/{key}/name")
+async def server_use_discord_name(request: Request, key: str):
+    """"Use the Discord name": copy the server's own name in Discord into the display name embed footers carry.
+    One click — the card comes back with the field already filled in and saved."""
+    st = request.app.state
+    store = st.runtime.store
     if key not in store.servers:
         raise HTTPException(404, f"unknown server {key}")
-    label = label_for(key, store.servers[key])
+    srv = store.servers[key]
+    real = await st.guild.guild_name(st.guild.guild_id(key))
+    if not real:
+        flash(request, "this server's Discord name is not known — the bot has to be in it first", "error")
+        if is_htmx(request):
+            return partial(request, "partials/server_form.html", {"server": await _card(request, key)}, status=422)
+        return redirect(request, "/discord")
+    srv["name"] = real
+    save(request)
+    flash(request, f"embed footers now say {real} — restart to apply", "success")
+    if is_htmx(request):
+        return partial(request, "partials/server_form.html", {"server": await _card(request, key)})
+    return redirect(request, "/discord")
+
+
+@router.post("/discord/servers/{key}/delete")
+async def server_delete(request: Request, key: str):
+    st = request.app.state
+    store = st.runtime.store
+    if key not in store.servers:
+        raise HTTPException(404, f"unknown server {key}")
+    names = await st.guild.names()
+    label = server_label(key, store.servers[key], names)
     if len(store.servers) <= 1:
         flash(request, "this is the only server — add another one before removing it", "error")
         return partial(request, "partials/server_list.html", await _list_ctx(request), status=422) if is_htmx(request) \
             else redirect(request, "/discord")
     moved = store.remove_server(key)
-    fallback = label_for(store.default_server(), store.server())
+    fallback = server_label(store.default_server(), store.server(), names)
     save(request)
     flash(request, f"{label} removed" + (f" — {', '.join(moved)} now post in {fallback}" if moved else ""), "info")
     if is_htmx(request):
@@ -207,7 +251,8 @@ async def server_default(request: Request, key: str):
     The store reads the default off the order of the servers block, and loading a config always puts the `main`
     entry first — so the two blocks swap places instead of being reordered. Every service is first pinned to the
     server it posts in today, so only *new* ones follow the change."""
-    store = request.app.state.runtime.store
+    st = request.app.state
+    store = st.runtime.store
     if key not in store.servers:
         raise HTTPException(404, f"unknown server {key}")
     srv = store.servers[key]
@@ -215,7 +260,7 @@ async def server_default(request: Request, key: str):
         flash(request, "give this server its Discord server id first", "error")
         return partial(request, "partials/server_list.html", await _list_ctx(request), status=422) if is_htmx(request) \
             else redirect(request, "/discord")
-    label = label_for(key, srv)
+    label = server_label(key, srv, await st.guild.names())
     current = store.default_server()
     if current != key:
         pinned = {name: store.server_for(name) for name in store.services}
