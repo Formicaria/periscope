@@ -17,6 +17,7 @@ rm -f /etc/systemd/system/periscope@.service
 # the standalone Plex bot is now the plexrequests service — stop the old unit so it doesn't double-post
 if [ -f /etc/systemd/system/displexia.service ]; then
     systemctl disable --now displexia >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/displexia.service
     echo "    retired the standalone Plex bot unit (its config was imported as the plexrequests service)"
 fi
 sed "s|__DIR__|$DIR|g" periscope.service > /etc/systemd/system/periscope.service
