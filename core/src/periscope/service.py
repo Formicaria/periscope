@@ -153,7 +153,16 @@ class ServiceBot:
         self.description = spec.description
         self._cogs: list[commands.Cog] = []
         self.healthy = True
+        self.built = False
         self.last_error: str | None = None
+
+    @property
+    def guild_id(self) -> int | None:
+        """The server this service works in: its own GUILD_ID (the lab's unless overridden, e.g. plexrequests)."""
+        raw = str(self.env.get("GUILD_ID") or "").strip()
+        if raw.isdigit():
+            return int(raw)
+        return self.presence.guild_id
 
     # ----- pass-throughs to the presence ---------------------------------------------------
     @property

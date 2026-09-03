@@ -7,7 +7,7 @@ CMD="$1"; shift
 svc() { exec "$PY" -m periscope.cli "$DIR" "$CMD" "$@"; }
 
 case "$CMD" in
-    list|status|enable|disable|check|config|presence|web|init) svc "$@" ;;
+    list|status|enable|disable|check|config|presence|bots|web|init) svc "$@" ;;
     layout)  exec "$PY" "$DIR/scripts/git_layout.py" "$@" ;;
     update)  exec bash "$DIR/update.sh" ;;
     logs)    if [ -n "$1" ]; then exec journalctl -u periscope -f -o cat | grep --line-buffered -i -E "\[$1\]|periscope_$1|$1"; else exec journalctl -u periscope -f; fi ;;
@@ -24,16 +24,16 @@ PY
 
   usage: periscope <command> [args]
 
-    web                     where the admin UI is (configure everything there)
-    list                    every service: enabled · state · presence
+    web                     the admin UI address + a one-time sign-in link (configure everything there)
+    list                    every service: state · bot it posts as · what needs attention
     enable <svc...>         turn a service on (config must be complete; restart applies)
     disable <svc...>
     check <svc>             test a service's credentials right now
     config <svc>            show a service's settings, secrets masked
-    presence [add|token]    manage Discord identities (tokens)
+    bots [add|token|use]    the Discord bot identities services post as (alias: presence)
     init                    first-run: paste a bot token, pick the server, create channels — or use the web UI
     layout                  apply the #git-* / #op-* channel convention (see --help)
-    status                  runtime status (presences, services, errors)
+    status                  raw runtime status (bots, services, errors) as JSON
     logs [svc]              follow the runtime log, optionally one service
     restart | start | stop  the periscope service
     update                  git pull, reinstall, restart

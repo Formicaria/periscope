@@ -35,11 +35,11 @@
   </div>
   {% if token_available %}
   <details class="collapse collapse-arrow bg-base-200 text-sm">
-    <summary class="collapse-title text-sm opacity-70">Locked out? Use the setup token from the runtime log</summary>
+    <summary class="collapse-title text-sm opacity-70">Locked out? Run <span class="mono">periscope web</span> on the box for a one-time link</summary>
     <div class="collapse-content">
       <form method="post" action="/auth/bootstrap" class="space-y-2">
         <input type="hidden" name="next" value="{{ next }}">
-        <input type="password" name="token" class="input input-bordered input-sm w-full mono" placeholder="web UI setup token: …" autocomplete="off" required>
+        <input type="password" name="token" class="input input-bordered input-sm w-full mono" placeholder="setup token from that link" autocomplete="off" required>
         <button class="btn btn-sm">Sign in as bootstrap admin</button>
       </form>
     </div>
@@ -49,34 +49,39 @@
   {% else %}
   <div class="card bg-base-200 shadow-sm">
     <form method="post" action="/auth/bootstrap" class="card-body p-6 gap-4" autocomplete="off">
-      <h2 class="text-lg font-semibold">First run — set up sign-in</h2>
-      <ol class="text-sm opacity-80 list-decimal list-inside space-y-1">
-        <li>Open the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener" class="link">Discord developer portal</a> → your application (any periscope bot works) → <b>OAuth2</b>.</li>
-        <li>Add this redirect URL: <span class="mono select-all break-all">{{ redirect_uri }}</span></li>
-        <li>Copy the <b>Client ID</b> and a <b>Client Secret</b> below.</li>
-        <li>Paste the setup token printed in the runtime log (<span class="mono">web UI setup token: …</span>; <span class="mono">periscope logs</span>).</li>
-      </ol>
+      <h2 class="text-lg font-semibold">Sign in</h2>
+      <p class="text-sm opacity-80">On the box, run <span class="mono select-all">periscope web</span> — it prints a one-time sign-in link. Open that link, or paste the token from it here.</p>
       <input type="hidden" name="next" value="{{ next }}">
       <label class="form-control">
         <span class="label-text text-sm pb-1">Setup token <span class="text-error">*</span></span>
-        <input type="password" name="token" class="input input-bordered input-sm mono" required autocomplete="off" {% if not token_available %}placeholder="already used — restart the runtime for a new one"{% endif %}>
+        <input type="password" name="token" class="input input-bordered input-sm mono" required autocomplete="off" {% if not token_available %}placeholder="already used — periscope restart makes a new one"{% endif %}>
       </label>
-      <label class="form-control">
-        <span class="label-text text-sm pb-1">Public base URL</span>
-        <input name="base_url" value="{{ base_url }}" class="input input-bordered input-sm mono" placeholder="{{ redirect_uri | replace('/auth/callback', '') }}">
-      </label>
-      <div class="grid gap-3 sm:grid-cols-2">
-        <label class="form-control">
-          <span class="label-text text-sm pb-1">OAuth2 client id</span>
-          <input name="client_id" value="{{ client_id }}" class="input input-bordered input-sm mono" placeholder="application id">
-        </label>
-        <label class="form-control">
-          <span class="label-text text-sm pb-1">OAuth2 client secret</span>
-          <input type="password" name="client_secret" class="input input-bordered input-sm mono" placeholder="{{ '•••• set' if secret_set else '' }}" autocomplete="new-password">
-        </label>
-      </div>
-      <p class="text-xs opacity-60">Client id and secret are optional right now: with only the token you are signed in as bootstrap admin and can add them later on the Discord page. Allowed Discord users = members holding an admin role of the lab (configurable there too).</p>
-      <button class="btn btn-primary btn-sm">Save and sign in</button>
+      <details class="collapse collapse-arrow bg-base-300/40 text-sm">
+        <summary class="collapse-title text-sm opacity-80 min-h-0 py-2">Optional: let people sign in with Discord instead</summary>
+        <div class="collapse-content space-y-3 pt-2">
+          <ol class="text-xs opacity-80 list-decimal list-inside space-y-1">
+            <li>Open the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener" class="link">Discord developer portal</a> → your application (any periscope bot works) → <b>OAuth2</b>.</li>
+            <li>Add this redirect URL: <span class="mono select-all break-all">{{ redirect_uri }}</span></li>
+            <li>Copy the <b>Client ID</b> and a <b>Client Secret</b> below. Members holding an admin role in the lab server can then sign in.</li>
+          </ol>
+          <label class="form-control">
+            <span class="label-text text-sm pb-1">Public base URL</span>
+            <input name="base_url" value="{{ base_url }}" class="input input-bordered input-sm mono" placeholder="{{ redirect_uri | replace('/auth/callback', '') }}">
+          </label>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="form-control">
+              <span class="label-text text-sm pb-1">OAuth2 client id</span>
+              <input name="client_id" value="{{ client_id }}" class="input input-bordered input-sm mono" placeholder="application id">
+            </label>
+            <label class="form-control">
+              <span class="label-text text-sm pb-1">OAuth2 client secret</span>
+              <input type="password" name="client_secret" class="input input-bordered input-sm mono" placeholder="{{ '•••• set' if secret_set else '' }}" autocomplete="new-password">
+            </label>
+          </div>
+          <p class="text-xs opacity-60">You can also do this later on the Discord page.</p>
+        </div>
+      </details>
+      <button class="btn btn-primary btn-sm">Sign in</button>
     </form>
   </div>
   {% endif %}

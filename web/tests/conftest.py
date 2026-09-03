@@ -254,7 +254,7 @@ def runtime(store, tmp_path, guild):
     pres = FakePresence("default", guild)
     pres.services = ["pve", "github"]
     states = {"pve": {"state": "running", "presence": "default", "error": None},
-              "github": {"state": "skipped", "presence": "default", "error": "missing: GITHUB_ORG"}}
+              "github": {"state": "needs setup", "presence": "default", "error": "needs Github Org — fill them in under Settings", "fix": "settings"}}
     rt = FakeRuntime(store, tmp_path, make_specs(), presences={"default": pres}, states=states)
     rt.started = time.time() + 5  # the store was saved *before* the runtime started → not dirty
     return rt

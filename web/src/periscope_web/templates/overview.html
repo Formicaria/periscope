@@ -1,26 +1,50 @@
 {% extends "base.html" %}
 {% block title %}Overview{% endblock %}
 {% block content %}
-<div class="flex flex-wrap items-center gap-3 mb-6">
+<div class="flex flex-wrap items-center gap-3 mb-4">
   <div class="stats stats-horizontal bg-base-200 shadow-sm">
     <div class="stat py-2 px-4"><div class="stat-title text-xs">running</div><div class="stat-value text-xl">{{ counts.running }}</div></div>
-    <div class="stat py-2 px-4"><div class="stat-title text-xs">enabled</div><div class="stat-value text-xl">{{ counts.enabled }}</div></div>
-    <div class="stat py-2 px-4"><div class="stat-title text-xs">problems</div><div class="stat-value text-xl {% if counts.problems %}text-warning{% endif %}">{{ counts.problems }}</div></div>
+    <div class="stat py-2 px-4"><div class="stat-title text-xs">switched on</div><div class="stat-value text-xl">{{ counts.enabled }}</div></div>
+    <div class="stat py-2 px-4"><div class="stat-title text-xs">needs attention</div><div class="stat-value text-xl {% if counts.problems %}text-warning{% endif %}">{{ counts.problems }}</div></div>
   </div>
-  <div class="flex flex-wrap gap-2 text-sm">
-    {% for pname, p in presences.items() %}
-    <span class="badge {{ 'badge-success' if p.connected else 'badge-warning' }} badge-outline gap-1">
-      <span class="mono">{{ pname }}</span>{% if p.user %} · {{ p.user }}{% endif %}
-    </span>
+  <div class="flex flex-wrap gap-2 text-sm" title="the Discord bots services post as">
+    {% for c in chips %}
+    <a href="/presences" class="badge {{ 'badge-success' if c.connected else 'badge-error' }} badge-outline gap-1" title="{{ c.error or (c.services | join(', ')) }}">
+      <span class="inline-block h-1.5 w-1.5 rounded-full {{ 'bg-success' if c.connected else 'bg-error' }}"></span>
+      {{ c.label }}{% if c.user %} · {{ c.user }}{% endif %}{% if not c.connected %} · offline{% endif %}
+    </a>
     {% endfor %}
-    {% if not presences %}<span class="text-sm opacity-60">no presence connected — enable a service and restart</span>{% endif %}
+    {% if not chips %}<span class="text-sm opacity-60">no bot is running — switch a service on and restart</span>{% endif %}
   </div>
-  {% if dirty %}
-  <div class="alert alert-warning py-2 text-sm w-full">
-    <span>Configuration changed since the runtime started — changes apply on restart.</span>
-  </div>
-  {% endif %}
 </div>
+
+{% if dirty %}
+<div class="alert alert-warning py-2 text-sm mb-4 flex flex-wrap items-center gap-3">
+  <span>Settings changed — they apply when periscope restarts.</span>
+  <form method="post" action="/restart" class="m-0 ml-auto" onsubmit="return confirm('Restart periscope now? Every bot reconnects (about 10 s).')">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-warning btn-xs">Restart now</button>
+  </form>
+</div>
+{% endif %}
+
+{% if attention %}
+<section class="mb-6">
+  <h2 class="text-xs uppercase tracking-widest opacity-60 mb-2">Needs attention</h2>
+  <ul class="rounded-box bg-base-200 shadow-sm divide-y divide-base-300/60">
+    {% for a in attention %}
+    <li class="flex flex-wrap items-start gap-2 px-4 py-2 text-sm">
+      <span class="badge badge-sm {{ state_badge(a.state) }} mt-0.5 whitespace-nowrap">{{ a.state }}</span>
+      <span class="font-medium">{{ a.title }}</span>
+      <span class="opacity-80 break-words min-w-0">— {{ a.problem }}</span>
+      {% if a.fix_href %}<a href="{{ a.fix_href }}" class="link link-primary ml-auto whitespace-nowrap">{{ a.fix_label }} →</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% elif counts.enabled and counts.running == counts.enabled %}
+<div class="text-sm opacity-70 mb-6">Everything that is switched on is running.</div>
+{% endif %}
 
 {% for key, title, cards in groups %}
 <section class="mb-8">
@@ -33,6 +57,6 @@
 </section>
 {% endfor %}
 {% if not groups %}
-<div class="text-sm opacity-60">No service packages are installed — <code class="mono">./venv/bin/pip install -e bots/&lt;name&gt;</code>.</div>
+<div class="text-sm opacity-60">No service packages are installed — run <code class="mono">periscope update</code> on the box.</div>
 {% endif %}
 {% endblock %}

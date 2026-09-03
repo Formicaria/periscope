@@ -95,7 +95,7 @@ async def test_three_services_share_prom_group(tmp_path, monkeypatch):
     assert names == {"prometheus:QueryCog", "prometheus:StatusCog", "alertmanager:AlertmanagerCog", "grafana:GrafanaCog"}
     assert prom.cfg.prom_url == "http://prom:9090" and prom.am is None and prom.grafana is None    # own keys only
     assert am.cfg.alertmanager_url == "http://am:9093" and gf.cfg.grafana_url == "http://grafana:3000"
-    assert ("POST", "/alertmanager") in {(r.method, r.resource.canonical) for r in rt.webhook.app.router.routes()}
+    assert ("POST", "/alertmanager") in rt.webhook._routes
     # the status board of `prometheus` sees the sibling services' clients
     status = prom.get_cog("StatusCog")
     assert status.owner("am") is am and status.client("am") is am.am and status.client("grafana") is gf.grafana

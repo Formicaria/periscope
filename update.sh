@@ -24,6 +24,9 @@ systemctl daemon-reload
 systemctl enable periscope >/dev/null
 echo "==> restart"
 systemctl restart periscope
-sleep 4
-periscope status || true
-echo "Updated. Logs: periscope logs    UI: periscope web"
+sleep 5
+echo
+periscope list || true
+echo
+periscope web || true
+echo "  Logs: periscope logs"

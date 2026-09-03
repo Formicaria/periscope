@@ -97,9 +97,11 @@ async def test_bootstrap_setup_page_and_token(make_app, store, reload):
     app = make_app(setup_token="tok-123")
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/login")
-        assert r.status_code == 200 and "First run" in r.text and "/auth/callback" in r.text
+        assert r.status_code == 200 and "periscope web" in r.text and "/auth/callback" in r.text
         r = await c.post("/auth/bootstrap", data={"token": "wrong", "client_id": "x"})
         assert r.status_code == 403 and SESSION_COOKIE not in c.cookies
+        r = await c.get("/login?token=wrong")                                            # a stale one-time link
+        assert r.status_code == 200 and "not valid any more" in r.text and SESSION_COOKIE not in c.cookies
         r = await c.post("/auth/bootstrap", data={"token": "tok-123", "client_id": "app1", "client_secret": "sec1", "base_url": "https://p.example/"})
         assert r.status_code == 303 and SESSION_COOKIE in c.cookies
         saved = reload()
@@ -111,3 +113,19 @@ async def test_bootstrap_setup_page_and_token(make_app, store, reload):
         assert r.status_code == 302
         r = await c.get("/")
         assert r.status_code == 302  # signed out
+
+
+async def test_one_time_login_link(make_app, store, runtime):
+    """`periscope web` prints /login?token=…: opening it signs the browser in and burns the token (also on disk)."""
+    store.web.update({"oauth_client_id": "", "oauth_client_secret": ""})
+    app = make_app(setup_token="tok-link")
+    from periscope_web.app import SETUP_TOKEN_FILE, write_setup_token
+    runtime.data_dir.mkdir(parents=True, exist_ok=True)
+    write_setup_token(runtime, "tok-link")
+    assert (runtime.data_dir / SETUP_TOKEN_FILE).read_text().strip() == "tok-link"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/login?token=tok-link&next=/presences")
+        assert r.status_code == 303 and r.headers["location"] == "/presences" and SESSION_COOKIE in c.cookies
+        assert app.state.setup_token is None and not (runtime.data_dir / SETUP_TOKEN_FILE).exists()
+        r = await c.get("/presences")
+        assert r.status_code == 200 and "bootstrap admin" in r.text

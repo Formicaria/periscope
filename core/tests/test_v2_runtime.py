@@ -136,10 +136,10 @@ async def test_runtime_skips_broken_config(tmp_path):
     s.services["sonarr"] = {"enabled": True, "presence": "ghost", "env": {}}                          # unknown presence → default token ok
     rt = Runtime(s, tmp_path)
     rt.assemble()
-    assert "proxmox" not in rt.services and rt.skipped["proxmox"].startswith("missing")
-    assert rt.skipped["nope"].startswith("unknown service")
+    assert "proxmox" not in rt.services and rt.skipped["proxmox"].startswith("needs ")
+    assert "not installed" in rt.skipped["nope"]
     st = rt.status()
-    assert st["services"]["proxmox"]["state"] == "skipped"
+    assert st["services"]["proxmox"]["state"] == "needs setup" and st["services"]["proxmox"]["fix"] == "settings"
 
 
 def test_build_intents_unions_named_flags():
@@ -175,7 +175,7 @@ def test_runtime_unions_service_intents_per_presence(tmp_path):
         "quiet": spec("quiet"),
     })
     rt.assemble()
-    assert set(rt.services) == {"proxmox", "needy", "sonarr", "quiet"} and rt.skipped["skipped"].startswith("missing")
+    assert set(rt.services) == {"proxmox", "needy", "sonarr", "quiet"} and rt.skipped["skipped"].startswith("needs ")
     pve, arr = rt.presences["proxmox"], rt.presences["arr"]
     assert pve.intents.members and pve.intents.message_content                      # needy's intents, on its presence
     assert not arr.intents.members and not arr.intents.message_content              # nothing runnable asked for any

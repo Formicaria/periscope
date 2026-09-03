@@ -2,7 +2,7 @@
 {% block title %}Logs{% endblock %}
 {% block content %}
 <form method="get" action="/logs" class="flex flex-wrap items-center gap-2 mb-3">
-  <input name="q" value="{{ q }}" class="input input-bordered input-sm mono w-64" placeholder="filter (substring: service name, [presence], text)">
+  <input name="q" value="{{ q }}" class="input input-bordered input-sm mono w-64" placeholder="filter: service name, [bot], any text">
   <select name="level" class="select select-bordered select-sm">
     <option value="">all levels</option>
     {% for lv in levels %}<option value="{{ lv }}" {% if lv == level %}selected{% endif %}>{{ lv }}+</option>{% endfor %}

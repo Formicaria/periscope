@@ -11,15 +11,15 @@
       <h3 class="font-semibold">{{ spec.title }}</h3>
       <p class="text-xs opacity-70">{{ spec.description }}</p>
       <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 mt-2">
-        <dt class="opacity-60">state</dt><dd><span class="badge badge-sm {{ state_badge(live.state or ('disabled' if not enabled else 'pending')) }}">{{ live.state or ('disabled' if not enabled else 'pending restart') }}</span></dd>
-        {% if live.error %}<dt class="opacity-60">last error</dt><dd class="text-error break-words">{{ live.error }}</dd>{% endif %}
+        <dt class="opacity-60">state</dt><dd><span class="badge badge-sm {{ state_badge(state) }}">{{ state }}</span></dd>
+        {% if problem %}<dt class="opacity-60">problem</dt><dd class="text-error break-words">{{ problem }}{% if fix %} · <a href="{{ fix[0] }}" class="link">{{ fix[1] }}</a>{% endif %}</dd>{% endif %}
         {% if spec.slash %}<dt class="opacity-60">commands</dt><dd class="mono">{{ spec.slash }}</dd>{% endif %}
         {% if webhook.needs %}<dt class="opacity-60">webhook</dt><dd class="mono break-all">http://&lt;host&gt;:{{ webhook.port }}{{ webhook.paths | join(', ') }}?token=&lt;webhook secret&gt;</dd>{% endif %}
         {% if spec.intents %}<dt class="opacity-60">intents</dt><dd class="mono">{{ spec.intents | join(', ') }}</dd>{% endif %}
       </dl>
     </div></div>
     <div class="text-xs opacity-60 px-1">
-      Saved settings are written to <span class="mono">config/periscope.yaml</span> and apply on the next restart. Secrets are never shown again once set.
+      Settings apply on the next restart (button in the header once something changed). Secrets are never shown again once set.
     </div>
   </aside>
 </div>

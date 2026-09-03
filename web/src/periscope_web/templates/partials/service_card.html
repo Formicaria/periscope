@@ -1,39 +1,39 @@
-<div class="card bg-base-200 shadow-sm" id="card-{{ card.name }}">
+<div class="card bg-base-200 shadow-sm {% if not card.enabled %}opacity-75{% endif %}" id="card-{{ card.name }}">
   <div class="card-body p-4 gap-2">
     <div class="flex items-start gap-2">
       <div class="min-w-0">
         <h3 class="card-title text-base leading-tight">
           <a href="/services/{{ card.name }}" class="link link-hover">{{ card.title }}</a>
-          {% if card.slash %}<span class="mono text-xs opacity-50 font-normal">{{ card.slash }}</span>{% endif %}
+          {% if card.slash %}<span class="mono text-xs opacity-50 font-normal" title="slash commands">{{ card.slash }}</span>{% endif %}
         </h3>
         <p class="text-xs opacity-70 mt-1 line-clamp-2" title="{{ card.description }}">{{ card.description }}</p>
       </div>
-      <span class="badge {{ state_badge(card.state) }} badge-sm ml-auto whitespace-nowrap" title="{{ card.detail }}">{{ card.state }}</span>
+      <span class="badge {{ state_badge(card.state) }} badge-sm ml-auto whitespace-nowrap">{{ card.state }}</span>
     </div>
     <div class="text-xs flex flex-wrap items-center gap-x-3 gap-y-1 opacity-80">
-      <span title="presence (bot identity)">via <span class="mono">{{ card.presence }}</span>{% if card.presence_user %} · {{ card.presence_user }}{% endif %}</span>
-      {% if card.needs_webhook %}<span class="mono" title="inbound webhook path(s)">{{ card.webhook_paths | join(' ') }}</span>{% endif %}
+      {% if card.enabled or card.presence_has_token %}
+      <span title="the Discord bot this service posts as">posts as <a href="/presences" class="link link-hover">{{ card.presence_label }}</a>{% if card.presence_user %} · {{ card.presence_user }}{% endif %}</span>
+      {% endif %}
+      {% if card.needs_webhook and card.enabled %}<span class="mono" title="inbound webhook path(s) on the shared listener">{{ card.webhook_paths | join(' ') }}</span>{% endif %}
     </div>
-    {% if card.detail and card.state in ('skipped', 'error', 'pending', 'missing') %}
-    <div class="text-xs {{ 'text-error' if card.state == 'error' else 'text-warning' if card.state == 'skipped' else 'opacity-70' }}">{{ card.detail }}</div>
+    {% if card.problem %}
+    <div class="text-xs {{ 'text-error' if card.state == 'error' else 'text-warning' if card.state == 'needs setup' else 'opacity-70' }} break-words">
+      {{ card.problem }}{% if card.fix_href %} · <a href="{{ card.fix_href }}" class="link">{{ card.fix_label }}</a>{% endif %}
+    </div>
     {% endif %}
     <div id="check-{{ card.name }}"></div>
     <div class="card-actions justify-end mt-1">
       {% if card.installed %}
       {% if card.enabled %}
-      <button class="btn btn-ghost btn-xs" hx-post="/services/{{ card.name }}/disable" hx-target="#card-{{ card.name }}" hx-swap="outerHTML">Disable</button>
+      <button class="btn btn-ghost btn-xs" hx-post="/services/{{ card.name }}/disable" hx-target="#card-{{ card.name }}" hx-swap="outerHTML" title="stops on the next restart">Switch off</button>
       {% else %}
-      <button class="btn btn-primary btn-xs" hx-post="/services/{{ card.name }}/enable" hx-target="#card-{{ card.name }}" hx-swap="outerHTML">Enable</button>
+      <button class="btn btn-primary btn-xs" hx-post="/services/{{ card.name }}/enable" hx-target="#card-{{ card.name }}" hx-swap="outerHTML" title="starts on the next restart">Switch on</button>
       {% endif %}
       {% if card.has_check %}
-      <button class="btn btn-ghost btn-xs" hx-post="/services/{{ card.name }}/check" hx-target="#check-{{ card.name }}" hx-swap="innerHTML" hx-indicator="this">
+      <button class="btn btn-ghost btn-xs" hx-post="/services/{{ card.name }}/check" hx-target="#check-{{ card.name }}" hx-swap="innerHTML" hx-indicator="this" title="check the saved credentials right now">
         <span class="htmx-indicator loading loading-spinner loading-xs"></span>Test</button>
       {% endif %}
       <a href="/services/{{ card.name }}" class="btn btn-ghost btn-xs">Settings</a>
-      <form method="post" action="/restart" class="m-0 inline" onsubmit="return confirm('Restart the periscope process? Every service reconnects (about 10 s); config changes apply on restart.')">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="btn btn-ghost btn-xs" title="restart the periscope process (all services) — config changes apply on restart">Restart</button>
-      </form>
       {% else %}
       <span class="text-xs opacity-60">package not installed</span>
       {% endif %}

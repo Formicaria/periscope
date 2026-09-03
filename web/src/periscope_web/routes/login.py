@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from ..app import site_url
+from ..app import clear_setup_token, site_url
 from ..auth import User, is_allowed
 from ..discordapi import DiscordError, authorize_url, avatar_url
 from ..render import flash, redirect, render
@@ -33,12 +33,30 @@ def _oauth_configured(store) -> bool:
     return bool(str(store.web.get("oauth_client_id") or "").strip() and str(store.web.get("oauth_client_secret") or "").strip())
 
 
+def _bootstrap_session(request: Request, nxt: str):
+    """Sign the browser in as the bootstrap admin and burn the one-time token."""
+    st = request.app.state
+    clear_setup_token(request.app)
+    resp = redirect(request, _safe_next(nxt), 303)
+    st.sessions.set(resp, User("bootstrap", "bootstrap admin", "", "bootstrap"))
+    log.info("web sign-in: bootstrap admin (setup token) from %s", request.client.host if request.client else "?")
+    return resp
+
+
 @router.get("/login")
-async def login(request: Request, next: str | None = None, error: str | None = None):
+async def login(request: Request, next: str | None = None, error: str | None = None, token: str | None = None):
     st = request.app.state
     if st.noauth or getattr(request.state, "user", None):
         return RedirectResponse(_safe_next(next), status_code=302)
     store = st.runtime.store
+    if token:
+        # the one-time link `periscope web` prints: /login?token=…
+        if st.setup_token and hmac.compare_digest(st.setup_token, token.strip()):
+            if not _oauth_configured(store):
+                flash(request, "Signed in. To let others sign in with Discord, add the OAuth application on the Discord page.", "info")
+            return _bootstrap_session(request, next or "/")
+        log.warning("web bootstrap: wrong or used setup token in link from %s", request.client.host if request.client else "?")
+        error = error or "That sign-in link is not valid any more — run `periscope web` on the box for a fresh one"
     return render(request, "login.html", {
         "oauth": _oauth_configured(store),
         "client_id": store.web.get("oauth_client_id") or "",
@@ -116,8 +134,10 @@ async def auth_bootstrap(request: Request):
     token = str(form.get("token") or "").strip()
     if not st.setup_token or not token or not hmac.compare_digest(st.setup_token, token):
         log.warning("web bootstrap: wrong setup token from %s", request.client.host if request.client else "?")
+        why = ("That setup token was already used — run `periscope web` on the box for a fresh link (a restart makes a new one)"
+               if not st.setup_token else "That is not the current setup token — run `periscope web` on the box and use the link it prints")
         return render(request, "login.html", {"oauth": _oauth_configured(store), "token_available": bool(st.setup_token),
-                                              "error": "That setup token is not the one in the runtime log", "next": "/",
+                                              "error": why, "next": "/",
                                               "client_id": form.get("client_id") or "", "base_url": form.get("base_url") or "",
                                               "redirect_uri": _redirect_uri(request)}, status=403)
     client_id = str(form.get("client_id") or "").strip()
@@ -135,15 +155,11 @@ async def auth_bootstrap(request: Request):
         changed = True
     if changed:
         save(request)
-    st.setup_token = None  # one-time
-    user = User("bootstrap", "bootstrap admin", "", "bootstrap")
     if _oauth_configured(store):
         flash(request, "Discord sign-in saved — next time, sign in with Discord", "success")
     else:
-        flash(request, "Signed in with the setup token — add the OAuth application on the Discord page to enable Discord sign-in", "info")
-    resp = redirect(request, _safe_next(str(form.get("next") or "/")), 303)
-    st.sessions.set(resp, user)
-    return resp
+        flash(request, "Signed in. To let others sign in with Discord, add the OAuth application on the Discord page.", "info")
+    return _bootstrap_session(request, str(form.get("next") or "/"))
 
 
 @router.api_route("/logout", methods=["GET", "POST"])

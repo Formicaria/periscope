@@ -36,10 +36,10 @@ systemctl daemon-reload
 systemctl enable periscope >/dev/null
 systemctl restart periscope
 
-sleep 4
-periscope status || true
+sleep 5
+echo
+periscope list || true
 echo
 echo "Done."
-periscope web
-echo "  Sign in with the setup token:  journalctl -u periscope | grep 'setup token' | tail -1"
+periscope web || true
 echo "  Logs: periscope logs    Update: periscope update"

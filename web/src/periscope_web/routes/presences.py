@@ -1,5 +1,5 @@
-"""/presences: bot identities — tokens (validated against Discord, never rendered back), labels, invite links,
-which services post through which presence."""
+"""/presences ("Bots" in the UI): the Discord identities services post as — tokens (validated against Discord,
+never rendered back), labels, invite links, which services use which bot, and why one is offline."""
 
 from __future__ import annotations
 
@@ -17,6 +17,17 @@ router = APIRouter()
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 
+def _fallback_for(store, name: str) -> str | None:
+    """Where a removed bot's services go: the shared default, else another bot that has a token. None when
+    this is the only working bot — removing it would leave every service without an identity."""
+    for cand in ["default", *store.presences]:
+        if cand != name and cand in store.presences and store.presences[cand].get("token"):
+            return cand
+    if not store.presences.get(name, {}).get("token"):
+        return next((c for c in store.presences if c != name), None)   # an empty row can always go
+    return None
+
+
 def _rows(request: Request) -> list[dict]:
     st = request.app.state
     runtime = st.runtime
@@ -25,11 +36,14 @@ def _rows(request: Request) -> list[dict]:
     rows = []
     for name, p in store.presences.items():
         live = status.get("presences", {}).get(name) or {}
-        users = [s for s, svc in store.services.items() if (svc.get("presence") or "default") == name]
+        users = [s for s in store.services if store.presence_for(s) == name]
+        fallback = _fallback_for(store, name)
         rows.append({"name": name, "label": p.get("label") or name, "has_token": bool(p.get("token")),
                      "services": users, "enabled": [s for s in users if store.services[s].get("enabled")],
                      "connected": bool(live.get("connected")), "user": live.get("user"), "live": bool(live),
-                     "app_id": st.app_ids.get(name)})
+                     "error": live.get("error"), "missing_guilds": live.get("missing_guilds") or {},
+                     "app_id": st.app_ids.get(name) or live.get("app_id"),
+                     "removable": fallback is not None, "fallback": fallback})
     return rows
 
 
@@ -49,14 +63,14 @@ async def presence_add(request: Request):
     name = str(form.get("name") or "").strip().lower()
     label = str(form.get("label") or "").strip() or name
     if not NAME_RE.match(name):
-        flash(request, "presence name: lowercase letters, digits, - or _ (max 32)", "error")
+        flash(request, "bot name: lowercase letters, digits, - or _ (max 32)", "error")
         return toasts(request, 422) if is_htmx(request) else redirect(request, "/presences")
     if name in store.presences:
-        flash(request, f"presence {name} already exists", "error")
+        flash(request, f"a bot named {name} already exists", "error")
         return toasts(request, 409) if is_htmx(request) else redirect(request, "/presences")
     store.presences[name] = {"token": "", "label": label}
     save(request)
-    flash(request, f"presence {name} added — set its token", "success")
+    flash(request, f"bot {name} added — now paste its token in the row", "success")
     if is_htmx(request):
         return partial(request, "partials/presence_table.html", {"rows": _rows(request)})
     return redirect(request, "/presences")
@@ -67,7 +81,7 @@ async def presence_token(request: Request, name: str):
     st = request.app.state
     store = st.runtime.store
     if name not in store.presences:
-        raise HTTPException(404, f"unknown presence {name}")
+        raise HTTPException(404, f"unknown bot {name}")
     form = await request.form()
     token = str(form.get("token") or "").strip()
     if not token:
@@ -76,14 +90,14 @@ async def presence_token(request: Request, name: str):
     try:
         me = await st.discord.me(token)
     except DiscordError as e:
-        flash(request, f"Discord rejected that token ({e.status or 'unreachable'})", "error")
+        flash(request, f"Discord rejected that token ({e.status or 'unreachable'}) — copy it again from the developer portal (Bot → Reset Token)", "error")
         return toasts(request, 422) if is_htmx(request) else redirect(request, "/presences")
     store.presences[name]["token"] = token
     if not store.presences[name].get("label"):
         store.presences[name]["label"] = str(me.get("username") or name)
     st.app_ids[name] = str(me.get("id"))
     save(request)
-    flash(request, f"token works — {me.get('username')} (app id {me.get('id')}); restart to apply", "success")
+    flash(request, f"token works — this is {me.get('username')} (app id {me.get('id')}); invite it to your server if you have not yet, then restart to apply", "success")
     if is_htmx(request):
         return partial(request, "partials/presence_row.html", {"row": _row(request, name)})
     return redirect(request, "/presences")
@@ -93,16 +107,13 @@ async def presence_token(request: Request, name: str):
 async def presence_label(request: Request, name: str):
     store = request.app.state.runtime.store
     if name not in store.presences:
-        raise HTTPException(404, f"unknown presence {name}")
+        raise HTTPException(404, f"unknown bot {name}")
     form = await request.form()
     label = str(form.get("label") or "").strip()
     new_name = str(form.get("new_name") or "").strip().lower()
     if label:
         store.presences[name]["label"] = label
     if new_name and new_name != name:
-        if name == "default":
-            flash(request, "the default presence cannot be renamed", "error")
-            return toasts(request, 422) if is_htmx(request) else redirect(request, "/presences")
         if not NAME_RE.match(new_name) or new_name in store.presences:
             flash(request, f"cannot rename to {new_name!r}", "error")
             return toasts(request, 422) if is_htmx(request) else redirect(request, "/presences")
@@ -113,7 +124,7 @@ async def presence_label(request: Request, name: str):
         request.app.state.app_ids.pop(name, None)
         name = new_name
     save(request)
-    flash(request, "presence updated — restart to apply", "success")
+    flash(request, "bot updated — restart to apply", "success")
     if is_htmx(request):
         return partial(request, "partials/presence_table.html", {"rows": _rows(request)})
     return redirect(request, "/presences")
@@ -122,18 +133,19 @@ async def presence_label(request: Request, name: str):
 @router.post("/presences/{name}/delete")
 async def presence_delete(request: Request, name: str):
     store = request.app.state.runtime.store
-    if name == "default":
-        flash(request, "the default presence cannot be removed", "error")
-        return toasts(request, 422) if is_htmx(request) else redirect(request, "/presences")
     if name not in store.presences:
-        raise HTTPException(404, f"unknown presence {name}")
+        raise HTTPException(404, f"unknown bot {name}")
+    fallback = _fallback_for(store, name)
+    if fallback is None:
+        flash(request, "this is the only bot with a token — it cannot be removed; add another bot first", "error")
+        return toasts(request, 422) if is_htmx(request) else redirect(request, "/presences")
     store.presences.pop(name)
     moved = [s for s, svc in store.services.items() if svc.get("presence") == name]
     for s in moved:
-        store.services[s]["presence"] = "default"
+        store.services[s]["presence"] = fallback
     request.app.state.app_ids.pop(name, None)
     save(request)
-    flash(request, f"presence {name} removed" + (f" — {', '.join(moved)} moved to default" if moved else ""), "info")
+    flash(request, f"bot {name} removed" + (f" — {', '.join(moved)} now post as {fallback}" if moved else ""), "info")
     if is_htmx(request):
         return partial(request, "partials/presence_table.html", {"rows": _rows(request)})
     return redirect(request, "/presences")
@@ -146,7 +158,7 @@ async def presence_invite(request: Request, name: str):
     store = st.runtime.store
     p = store.presences.get(name)
     if p is None:
-        raise HTTPException(404, f"unknown presence {name}")
+        raise HTTPException(404, f"unknown bot {name}")
     if not p.get("token"):
         return partial(request, "partials/invite.html", {"name": name, "url": None, "why": "no token"})
     app_id = st.app_ids.get(name)

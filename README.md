@@ -33,21 +33,24 @@ cd /opt/periscope
 bash setup.sh          # python + venv + every service + web UI, one systemd service: periscope
 ```
 
-Then open the web UI (`periscope web` prints the address, default `http://<box>:8090`), sign in once with the
-setup token from the log (`journalctl -u periscope | grep 'setup token'`), and the first-run flow takes it from
-there: paste a bot token → invite link → pick the server → create the channel layout → enable services one by one,
-each with a **Test** button that checks the credentials against the real thing. Afterwards sign-in is Discord OAuth
-for members holding `@lab-admin`. Prefer a terminal? `periscope init` does the token/server step, then
+Then run `periscope web`: it prints the UI address (`http://<box ip>:8090`) and a **one-time sign-in link** — open
+it and the first-run flow takes it from there: paste a bot token → invite link → pick the server → create the
+channel layout → switch services on one by one, each with a **Test** button that checks the credentials against the
+real thing. Optionally add a Discord OAuth application (Discord page) so members holding `@lab-admin` can sign in
+with Discord. Prefer a terminal? `periscope init` does the token/server step, then
 `periscope config <service> KEY=VALUE` and `periscope enable <service>`.
 
 Everything lives in one process (`python -m periscope`, unit `periscope.service`) and one file, `config/periscope.yaml`
-(mode 0600). Services post through *presences* — Discord identities. New installs get one shared bot; any service can
-be pointed at its own application in the UI (**Presences**) so it keeps its own name and avatar.
+(mode 0600). Services post as *bots* — Discord identities (called presences in the config). New installs get one
+shared bot; any service can be pointed at its own application in the UI (**Bots**) so it keeps its own name and avatar.
+
+The Overview says in plain words what state every service is in — `running`, `starting`, `needs setup`, `error`, `off` —
+and lists what needs attention with a link to the page that fixes it. `periscope list` prints the same.
 
 ### Coming from v1 (one unit per bot)
 
 `periscope update` does it: the runtime imports every `bots/*/.env` (and `/opt/displexia/.env` if that bot ran on
-the box) into `config/periscope.yaml` on first start — one presence per old bot, so nothing changes in Discord — and
+the box) into `config/periscope.yaml` on first start — one bot identity per old bot, so nothing changes in Discord — and
 retires the `periscope@<bot>` units. The old `.env` files are left untouched; delete them when you're happy.
 
 ### Proxmox LXC in one command
@@ -68,12 +71,12 @@ Override anything with env vars: `CTID=210 IP=192.168.1.50/24 GW=192.168.1.1 VLA
 ## The `periscope` CLI
 
 ```
-periscope web                  where the admin UI is
-periscope list                 every service: enabled · state · presence
+periscope web                  the admin UI address + a one-time sign-in link
+periscope list                 every service: state · bot it posts as · what needs attention
 periscope enable <svc…>        turn a service on (config must be complete)     periscope disable <svc…>
 periscope check <svc>          test a service's credentials right now
 periscope config <svc> [K=V]   show or set a service's settings, secrets masked
-periscope presence …           add identities, set tokens, assign services
+periscope bots …               add bot identities, set tokens, assign services (alias: presence)
 periscope layout               apply the #git-* / #op-* channel convention, print the repo→channel map
 periscope status | logs [svc]  runtime status, live log (filtered to one service)
 periscope restart|start|stop   the service        periscope update   git pull, reinstall, restart
@@ -81,11 +84,12 @@ periscope restart|start|stop   the service        periscope update   git pull, r
 
 Config changes (UI or CLI) apply on restart; the UI shows a "restart to apply" banner and a button.
 
-## Discord setup (once per presence)
+## Discord setup (once per bot)
 
 <https://discord.com/developers/applications> → **New Application** → **Bot** → **Reset Token**. Paste it into the web
-UI (or `periscope presence token default`); it prints the invite link with the right permissions and detects the
-server once the bot joins. No privileged intents are needed unless you enable `plexrequests` (Server Members +
+UI (or `periscope bots token default`); it prints the invite link with the right permissions and detects the
+server once the bot joins. A bot only registers its slash commands on servers it is actually in; one it was never
+invited to shows up under "needs attention" with the invite link. No privileged intents are needed unless you enable `plexrequests` (Server Members +
 Message Content, for auto-revoke and typed requests) — the UI says so on that service's page.
 
 For THE LAB specifically: [`docs/discord-apps.md`](docs/discord-apps.md) has the existing applications and channel

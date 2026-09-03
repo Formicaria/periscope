@@ -15,18 +15,18 @@ Discord OAuth2. Allowed = members of the lab guild holding any of `web.allowed_r
 (defaulting to `lab.admin_role_ids`; when both are empty, the guild owner). The Discord application needs
 `<base_url>/auth/callback` as a redirect URL (developer portal → OAuth2).
 
-First run: while `web.oauth_client_id` is empty the login page shows a setup form that accepts the
-**setup token** printed in the runtime log at startup (`web UI setup token: …`), stores the OAuth client
-id/secret + base URL and signs you in as bootstrap admin. `PERISCOPE_WEB_NOAUTH=1` disables the sign-in
+First run: `periscope web` on the box prints a one-time link (`/login?token=…`; the token also lands in
+`data/web-setup-token`, mode 0600, until used) that signs you in as bootstrap admin. The login page accepts the
+same token by hand and can store the OAuth client id/secret + base URL for Discord sign-in. `PERISCOPE_WEB_NOAUTH=1` disables the sign-in
 entirely for local development (loud warning in the log).
 
 ## Pages
 
 | path | what |
 |---|---|
-| `/` | every service as a card (state, presence, last error) with Enable / Disable / Test / Restart |
+| `/` | "needs attention" list with a fix link per problem; every service as a card (plain-language state, the bot it posts as) with Switch on/off / Test |
 | `/services/<name>` | the service's typed settings as a form; Test runs `check()` on the submitted values |
-| `/presences` | bot identities: tokens, invite links, which services post through which |
+| `/presences` | **Bots**: identities (tokens, checked against Discord), invite links, which services post as which, why one is offline |
 | `/discord` | lab settings, web sign-in settings, channel layout (create missing, apply git/op permissions) |
 | `/routing` | GitHub repo → channel map, feed / CI catch-alls, per-service alert routing |
 | `/logs` | live log tail (SSE), filter by service, download |

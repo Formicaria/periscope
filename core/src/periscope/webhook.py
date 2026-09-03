@@ -21,6 +21,9 @@ class WebhookServer:
         srv.add_route("POST", "/alertmanager", handler)
         await srv.start()
 
+    Routes are looked up in a table at request time, so `add_route` works before *and* after `start()` —
+    services build after the listener is up, and can be reloaded later without touching the socket.
+
     Auth: if `secret` is set, requests must carry either
       - header  X-Webhook-Secret: <secret>          (simple shared secret), or
       - query   ?token=<secret>, or
@@ -32,8 +35,10 @@ class WebhookServer:
         self.port = port
         self.secret = secret
         self.extra_secrets: set[str] = set()  # v2: per-service WEBHOOK_SECRET overrides are accepted too
+        self._routes: dict[tuple[str, str], Handler] = {}
         self.app = web.Application(client_max_size=4 * 1024 * 1024)
         self.app.router.add_get("/health", self._health)
+        self.app.router.add_route("*", "/{tail:.*}", self._dispatch)
         self._runner: web.AppRunner | None = None
         self._healthy: Callable[[], bool] = lambda: True
 
@@ -43,6 +48,17 @@ class WebhookServer:
     async def _health(self, _: web.Request) -> web.Response:
         ok = self._healthy()
         return web.json_response({"ok": ok}, status=200 if ok else 503)
+
+    async def _dispatch(self, request: web.Request) -> web.StreamResponse:
+        key = (request.method.upper(), request.path)
+        handler = self._routes.get(key) or self._routes.get((key[0], key[1].rstrip("/") or "/"))
+        if handler is None:
+            return web.json_response({"error": "no such webhook", "paths": sorted(self.paths)}, status=404)
+        return await handler(request)
+
+    @property
+    def paths(self) -> list[str]:
+        return sorted({p for _, p in self._routes})
 
     @property
     def secrets(self) -> set[str]:
@@ -80,7 +96,10 @@ class WebhookServer:
                 log.exception("webhook handler error on %s %s", method, path)
                 return web.json_response({"error": "handler failed"}, status=500)
 
-        self.app.router.add_route(method, path, wrapped)
+        self._routes[(method.upper(), path)] = wrapped
+
+    def remove_route(self, method: str, path: str) -> None:
+        self._routes.pop((method.upper(), path), None)
 
     async def start(self) -> None:
         self._runner = web.AppRunner(self.app, access_log=None)

@@ -1,9 +1,9 @@
-<tr id="alert-{{ row.name }}" class="{% if not row.enabled %}opacity-60{% endif %}">
+<tr id="alert-{{ row.name }}" class="{% if not row.enabled %}opacity-60 svc-off{% endif %}">
   <td>
     <form id="alert-form-{{ row.name }}" hx-post="/routing/alerts/{{ row.name }}" hx-target="#alert-{{ row.name }}" hx-swap="outerHTML" class="inline"></form>
     <a href="/services/{{ row.name }}" class="link link-hover font-medium">{{ row.title }}</a>
     <span class="badge badge-ghost badge-xs ml-1">{{ row.group }}</span>
-    {% if not row.enabled %}<span class="text-[10px] opacity-60 ml-1">disabled</span>{% endif %}
+    {% if not row.enabled %}<span class="text-[10px] opacity-60 ml-1">off</span>{% endif %}
   </td>
   {% for key, options in (('ALERT_CHANNEL_ID', channels), ('STATUS_CHANNEL_ID', channels), ('ALERT_ROLE_ID', roles)) %}
   {% set current = row['values'][key] %}

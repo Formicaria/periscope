@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from ..forms import build_fields, parse_form
-from ..render import flash, is_htmx, partial, redirect, render
+from ..render import fix_link, flash, is_htmx, partial, redirect, render
 from . import save
 
 log = logging.getLogger(__name__)
@@ -22,13 +22,19 @@ async def _ctx(request: Request, name: str, *, errors: list[str] | None = None) 
     spec = runtime.specs.get(name)
     if spec is None:
         raise HTTPException(404, f"unknown service {name}")
-    svc = store.services.get(name) or {"enabled": False, "presence": spec.default_presence, "env": {}}
+    svc = store.services.get(name) or {"enabled": False, "presence": store.default_presence(), "env": {}}
     env = {str(k): ("" if v is None else str(v)) for k, v in (svc.get("env") or {}).items()}
     channels, roles = await st.guild.channels(), await st.guild.roles()
     live = runtime.status().get("services", {}).get(name) or {}
+    enabled = bool(svc.get("enabled"))
+    state = live.get("state") if enabled else "off"
+    if enabled and not live:
+        state = "on after restart"
     return {
-        "spec": spec, "name": name, "svc": svc, "enabled": bool(svc.get("enabled")),
-        "presence": svc.get("presence") or spec.default_presence,
+        "spec": spec, "name": name, "svc": svc, "enabled": enabled, "state": state or "starting",
+        "problem": live.get("error") if enabled and live.get("state") != "running" else None,
+        "fix": fix_link(live.get("fix"), name) if enabled else None,
+        "presence": store.presence_for(name),
         "presences": [(k, v.get("label") or k, bool(v.get("token"))) for k, v in store.presences.items()],
         "groups": build_fields(spec, env, channels=channels, roles=roles, store=store),
         "pickers": bool(channels), "errors": errors or [], "live": live,
@@ -54,9 +60,9 @@ async def service_save(request: Request, name: str):
     current = {str(k): ("" if v is None else str(v)) for k, v in (svc.get("env") or {}).items()}
     enabled = str(form.get("_enabled") or "").lower() in ("1", "true", "on", "yes")
     values, errors = parse_form(spec, form, current, require=enabled)
-    presence = str(form.get("_presence") or svc.get("presence") or spec.default_presence)
+    presence = str(form.get("_presence") or svc.get("presence") or store.default_presence())
     if presence not in store.presences:
-        errors.append(f"unknown presence {presence!r}")
+        errors.append(f"unknown bot {presence!r}")
     if errors:
         for e in errors:
             flash(request, e, "error")
@@ -69,12 +75,15 @@ async def service_save(request: Request, name: str):
     svc["enabled"] = enabled
     save(request)
     missing = spec.required_missing(store.env_for(name))
+    labels = [(spec.setting(k).label if spec.setting(k) else k) for k in missing]
     if missing and enabled:
-        flash(request, f"saved — {spec.title} is enabled but still missing {', '.join(missing)}", "warning")
+        flash(request, f"saved — {spec.title} is on but still needs {', '.join(labels)}", "warning")
     elif missing:
-        flash(request, f"saved — still needed before enabling: {', '.join(missing)}", "info")
+        flash(request, f"saved — still needed before switching on: {', '.join(labels)}", "info")
+    elif enabled:
+        flash(request, "saved — applies on the next restart (button in the header)", "success")
     else:
-        flash(request, "saved — restart to apply", "success")
+        flash(request, "saved", "success")
     if is_htmx(request):
         return partial(request, "partials/service_form.html", await _ctx(request, name))
     return redirect(request, f"/services/{name}")

@@ -121,7 +121,6 @@ def migrate_v1(store: Store, root: Path) -> list[str]:
         store.services["plexrequests"] = {"enabled": True, "presence": "plex", "env": env}
         created.append("plexrequests")
 
-    if not store.presences.get("default", {}).get("token") and envs:
-        # shared identity stays empty until the user adds one; keep a label so the UI explains it
-        store.presences.setdefault("default", {"token": "", "label": "periscope"})
+    # one identity per old bot is the whole picture — an empty shared `default` would only show as "missing token"
+    store.tidy()
     return created

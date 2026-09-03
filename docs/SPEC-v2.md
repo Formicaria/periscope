@@ -96,12 +96,12 @@ OAuth**, allowed = members holding `@lab-admin` in the configured guild, so ther
 
 Pages:
 
-1. **Overview** — every service as a card: enabled · healthy · last poll · last error · presence used. Toggle, Test, Restart per card.
+1. **Overview** — a "needs attention" list (plain-language problem + link to the page that fixes it), then every service as a card: state (`running · starting · needs setup · error · off`) · the bot it posts as. Switch on/off + Test per card; one Restart (header) once settings changed.
 2. **Service settings** — the typed `settings` of that service rendered as a form (secrets masked, "Test" runs `check()` live, channel/role pickers pull the guild's channels/roles by name). Save = validate → write config → hot-reload that service only.
-3. **Discord** — presences (tokens, which services use which), channel convention with a "create missing" button (the wizard's layout step), `periscope layout` as a button.
+3. **Bots** — presences in the config: tokens (checked against Discord), invite links, which services post as which, why one is offline. **Discord** — lab settings, web sign-in, channel convention with a "create missing" button, `periscope layout` as a button.
 4. **Feeds & routing** — the GitHub repo→channel map as a table (repo · channel · CI channel · mirror), alert routing (severity → channel, role to ping).
 5. **Logs** — live tail per service (websocket), download.
-6. **First run** — replaces the terminal wizard: paste Discord token → invite link → pick server → create channels → add services one by one, each with Test.
+6. **First run** — `periscope web` prints a one-time sign-in link; then: paste Discord token → invite link → pick server → create channels → add services one by one, each with Test.
 
 ### Stack options
 

@@ -11,10 +11,12 @@ import time
 from pathlib import Path
 
 from .config import Settings, env_scope
+from .net import web_url
 from .registry import discover
 from .store import Store, is_secret_key
 
-STATE_ICON = {"running": "●", "connecting": "◐", "pending": "◐", "error": "✖", "skipped": "○", "disabled": "·"}
+STATE_ICON = {"running": "●", "starting": "◐", "error": "✖", "needs setup": "○", "off": "·"}
+FIX_PAGE = {"settings": "Settings", "bots": "Bots page", "logs": "Logs", "discord": "Discord page"}
 
 
 def _runtime_status(root: Path) -> dict:
@@ -38,20 +40,34 @@ def cmd_list(store: Store, root: Path, args: list[str]) -> int:
     rt = _runtime_status(root)
     services = rt.get("services", {})
     if rt and not rt.get("stale"):
-        _say(f"  runtime up {rt.get('uptime_s', 0) // 60} min · presences: " +
-             ", ".join(f"{n}{'' if p.get('connected') else ' (offline)'}" for n, p in rt.get("presences", {}).items()))
+        _say(f"  runtime up {rt.get('uptime_s', 0) // 60} min")
+        for n, p in rt.get("presences", {}).items():
+            who = f" as {p['user']}" if p.get("user") else ""
+            _say(f"    bot {n:<10} {'online' + who if p.get('connected') else 'OFFLINE — ' + str(p.get('error') or 'connecting')}")
     else:
         _say("  runtime not running (periscope start)")
+    _say("    " + "STATE".ljust(13) + "SERVICE".ljust(15) + "BOT".ljust(11) + "TITLE")
     names = sorted(set(specs) | set(store.services), key=lambda n: (specs[n].group if n in specs else "zzz", n))
+    problems: list[str] = []
     for name in names:
-        cfg = store.service(name) if name in store.services else {"enabled": False, "presence": "-", "env": {}}
+        cfg = store.services.get(name) or {"enabled": False, "presence": "", "env": {}}
         live = services.get(name, {})
-        state = live.get("state") if cfg.get("enabled") else "disabled"
-        state = state or ("pending" if cfg.get("enabled") else "disabled")
+        if not cfg.get("enabled"):
+            state = "off"
+        else:
+            state = live.get("state") or "starting"
         icon = STATE_ICON.get(state, "?")
         title = specs[name].title if name in specs else name + " (not installed)"
-        err = f"  — {live['error']}" if live.get("error") else ""
-        _say(f"  {icon} {name:<14} {state:<10} {cfg.get('presence', '-'):<10} {title}{err}")
+        bot = store.presence_for(name) if cfg.get("enabled") else "-"
+        _say(f"  {icon} {state:<13}{name:<15}{bot:<11}{title}")
+        if cfg.get("enabled") and live.get("error") and state != "starting":
+            where = FIX_PAGE.get(live.get("fix") or "", "")
+            problems.append(f"{name}: {live['error']}" + (f"  → {where}" if where else ""))
+    if problems:
+        _say("\n  needs attention:")
+        for p in problems:
+            _say(f"    ✖ {p}")
+        _say("  fix in the web UI: " + web_url(store))
     return 0
 
 
@@ -83,7 +99,7 @@ def cmd_enable(store: Store, root: Path, args: list[str], on: bool = True) -> in
                 rc = 1
                 continue
             if not store.token_for(name):
-                _say(f"  {name}: presence '{store.presence_for(name)}' has no token — periscope presence token {store.presence_for(name)}")
+                _say(f"  {name}: bot '{store.presence_for(name)}' has no token — periscope presence token {store.presence_for(name)}")
                 rc = 1
                 continue
         store.set_enabled(name, on)
@@ -184,20 +200,29 @@ async def _check_token(token: str) -> tuple[bool, str]:
             return True, f"token works — {d.get('username')} (app id {d.get('id')})"
 
 
+def setup_token(root: Path) -> str:
+    """The one-time web sign-in token the running web UI wrote to data/ (empty once used or when not running)."""
+    try:
+        return (root / "data" / "web-setup-token").read_text().strip()
+    except OSError:
+        return ""
+
+
 def cmd_web(store: Store, root: Path, args: list[str]) -> int:
-    web = store.web
-    host = str(web.get("host") or "0.0.0.0")
-    if host in ("0.0.0.0", "::", ""):
-        host = socket.gethostname()
-    url = str(web.get("base_url") or "").rstrip("/") or f"http://{host}:{web.get('port', 8090)}"
+    url = web_url(store)
     _say(f"  web UI: {url}")
     rt = _runtime_status(root)
-    if rt and not rt.get("stale"):
-        _say(f"  runtime is up (pid {rt.get('pid')}, {int(rt.get('uptime_s', 0)) // 60} min)")
-        if not web.get("oauth_client_id"):
-            _say("  first sign-in uses the setup token from the log:  journalctl -u periscope | grep 'setup token' | tail -1")
-    else:
+    if not rt or rt.get("stale"):
         _say("  runtime is not running — periscope start")
+        return 1
+    _say(f"  runtime is up (pid {rt.get('pid')}, {int(rt.get('uptime_s', 0)) // 60} min)")
+    tok = setup_token(root)
+    if tok:
+        _say(f"  sign in (one-time link, valid until used or the next restart):\n    {url}/login?token={tok}")
+    elif not store.web.get("oauth_client_id"):
+        _say("  the one-time sign-in link was already used; restart to get a new one (periscope restart), or set up Discord sign-in on the Discord page")
+    else:
+        _say("  sign in with Discord (an account holding an admin role in the lab server)")
     return 0
 
 
@@ -243,7 +268,7 @@ def cmd_init(store: Store, root: Path, args: list[str]) -> int:
 
 
 VERBS = {"list": cmd_list, "status": cmd_status, "enable": cmd_enable, "disable": lambda s, r, a: cmd_enable(s, r, a, on=False),
-         "check": cmd_check, "config": cmd_config, "presence": cmd_presence, "web": cmd_web, "init": cmd_init}
+         "check": cmd_check, "config": cmd_config, "presence": cmd_presence, "bots": cmd_presence, "web": cmd_web, "init": cmd_init}
 
 
 def main(argv: list[str] | None = None) -> int:

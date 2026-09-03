@@ -100,7 +100,7 @@ class Store:
         return self.data["services"]
 
     def service(self, name: str) -> dict[str, Any]:
-        return self.services.setdefault(name, {"enabled": False, "presence": "default", "env": {}})
+        return self.services.setdefault(name, {"enabled": False, "presence": self.default_presence(), "env": {}})
 
     def enabled_services(self) -> list[str]:
         return [n for n, s in self.services.items() if s.get("enabled")]
@@ -108,12 +108,35 @@ class Store:
     def set_enabled(self, name: str, on: bool) -> None:
         self.service(name)["enabled"] = bool(on)
 
+    def default_presence(self) -> str:
+        """The bot identity a service uses when it does not name one: `default` when that has a token, else
+        the first identity that does (a migrated install has one per old bot and no shared one)."""
+        if self.presences.get("default", {}).get("token"):
+            return "default"
+        for name, p in self.presences.items():
+            if p.get("token"):
+                return name
+        return "default" if "default" in self.presences else next(iter(self.presences), "default")
+
     def presence_for(self, name: str) -> str:
-        p = self.service(name).get("presence") or "default"
-        return p if p in self.presences else "default"
+        p = str((self.services.get(name) or {}).get("presence") or "")
+        return p if p and p in self.presences else self.default_presence()
 
     def token_for(self, name: str) -> str:
         return str(self.presences.get(self.presence_for(name), {}).get("token") or "")
+
+    def tidy(self) -> bool:
+        """Drop the empty `default` identity once real ones exist and nothing points at it (a migrated install
+        would otherwise show a bot with a 'missing token' forever). Returns True when something changed."""
+        d = self.presences.get("default")
+        if d is None or d.get("token"):
+            return False
+        others = [n for n, p in self.presences.items() if n != "default" and p.get("token")]
+        used = any((s.get("presence") or "") == "default" for s in self.services.values())
+        if not others or used:
+            return False
+        self.presences.pop("default")
+        return True
 
     # ----- flattening -----------------------------------------------------------------------
     def lab_env(self) -> dict[str, str]:

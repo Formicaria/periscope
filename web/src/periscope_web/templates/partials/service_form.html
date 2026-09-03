@@ -8,17 +8,17 @@
     <div class="flex flex-wrap items-center gap-4">
       <label class="label cursor-pointer gap-3 p-0">
         <input type="checkbox" name="_enabled" value="true" class="toggle toggle-primary" {% if enabled %}checked{% endif %}>
-        <span class="label-text font-medium">Enabled</span>
+        <span class="label-text font-medium">Switched on</span>
       </label>
       <label class="flex items-center gap-2 text-sm">
         <span class="opacity-70">posts as</span>
         <select name="_presence" class="select select-bordered select-sm mono">
           {% for pname, plabel, has_token in presences %}
-          <option value="{{ pname }}" {% if pname == presence %}selected{% endif %}>{{ pname }} · {{ plabel }}{% if not has_token %} (no token){% endif %}</option>
+          <option value="{{ pname }}" {% if pname == presence %}selected{% endif %}>{{ plabel }}{% if plabel != pname %} ({{ pname }}){% endif %}{% if not has_token %} — no token yet{% endif %}</option>
           {% endfor %}
         </select>
       </label>
-      <a href="/presences" class="link link-hover text-xs opacity-60">manage presences</a>
+      <a href="/presences" class="link link-hover text-xs opacity-60">manage bots</a>
     </div>
   </div></section>
 

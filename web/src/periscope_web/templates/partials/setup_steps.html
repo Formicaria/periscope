@@ -10,7 +10,7 @@
   <div class="card bg-base-200 shadow-sm {% if current != 'token' and steps.token %}opacity-80{% endif %}">
     <div class="card-body p-4 gap-3">
       <div class="flex items-center gap-2"><span class="badge {{ 'badge-success' if steps.token else 'badge-primary' }} badge-sm">1</span><h3 class="font-semibold">Bot token</h3>
-        {% if steps.token %}<span class="text-xs opacity-60 ml-auto">presence <span class="mono">{{ presence }}</span> has a token</span>{% endif %}</div>
+        {% if steps.token %}<span class="text-xs opacity-60 ml-auto">bot <span class="mono">{{ presence }}</span> has a token</span>{% endif %}</div>
       <p class="text-xs opacity-70"><a href="https://discord.com/developers/applications" target="_blank" rel="noopener" class="link">Developer portal</a> → New Application → <b>Bot</b> → <b>Reset Token</b>. No privileged intents are needed. The token is verified against Discord and never shown again.</p>
       <form hx-post="/setup/token" hx-target="#setup-steps" hx-swap="outerHTML" method="post" action="/setup/token" class="flex flex-wrap gap-2" autocomplete="off">
         <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -21,7 +21,7 @@
       {% if invite %}
       <div class="alert alert-info py-2 text-sm"><span>Invite the bot to your server: <a href="{{ invite }}" target="_blank" rel="noopener" class="link font-medium">open the invite link</a> (scopes bot + applications.commands, permissions to post, manage messages/channels/roles).</span></div>
       {% elif steps.token %}
-      <div class="text-xs opacity-60">Invite link: see <a href="/presences" class="link">Presences</a>.</div>
+      <div class="text-xs opacity-60">Invite link: see <a href="/presences" class="link">Bots</a>.</div>
       {% endif %}
     </div>
   </div>

@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from periscope.net import web_url
 
 from .auth import PUBLIC_PREFIXES, CsrfFailed, NotLoggedIn, Sessions, User, csrf_ok, noauth
 from .discordapi import DiscordAPI
@@ -48,14 +49,29 @@ async def csrf_gate(request: Request) -> None:
 
 
 def public_url(store, host: str | None = None, port: int | None = None) -> str:
-    """`web.base_url`, else http://<hostname>:<port> — what the log prints at startup."""
-    base = str(store.web.get("base_url") or "").strip().rstrip("/")
-    if base:
-        return base
-    h = host or str(store.web.get("host") or "0.0.0.0")
-    if h in ("0.0.0.0", "::", ""):
-        h = socket.gethostname()
-    return f"http://{h}:{port or store.web.get('port', 8090)}"
+    """`web.base_url`, else http://<lan ip>:<port> — what the log and `periscope web` print."""
+    return web_url(store, host, port)
+
+
+SETUP_TOKEN_FILE = "web-setup-token"
+
+
+def write_setup_token(runtime, token: str) -> None:
+    """Keep the one-time sign-in token where `periscope web` can print it as a link (data/, mode 0600)."""
+    try:
+        p = runtime.data_dir / SETUP_TOKEN_FILE
+        p.write_text(token + "\n")
+        p.chmod(0o600)
+    except Exception:  # noqa: BLE001
+        log.debug("could not write the setup token file", exc_info=True)
+
+
+def clear_setup_token(app: FastAPI) -> None:
+    app.state.setup_token = None
+    try:
+        (app.state.runtime.data_dir / SETUP_TOKEN_FILE).unlink()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def site_url(request: Request) -> str:
@@ -174,9 +190,11 @@ async def serve(runtime, host: str = "0.0.0.0", port: int = 8090) -> None:
         log.warning("PERISCOPE_WEB_NOAUTH=1 — the web UI at %s treats EVERY visitor as admin; development only", url)
     else:
         log.info("web UI at %s", url)
+        write_setup_token(runtime, token)
         if not str(runtime.store.web.get("oauth_client_id") or "").strip():
-            log.warning("web UI sign-in is not set up yet — open %s/login and paste the setup token", url)
-        log.warning("web UI setup token: %s", token)
+            log.warning("web UI sign-in: open %s/login?token=%s (one-time link; `periscope web` prints it again)", url, token)
+        else:
+            log.info("web UI setup token (if Discord sign-in is locked out): %s", token)
     try:
         sock = _bind(host, port)
     except OSError as e:
@@ -195,6 +213,7 @@ async def serve(runtime, host: str = "0.0.0.0", port: int = 8090) -> None:
         raise
     finally:
         logging.getLogger().removeHandler(buf)
+        clear_setup_token(app)
         with contextlib.suppress(Exception):
             sock.close()
         with contextlib.suppress(Exception):

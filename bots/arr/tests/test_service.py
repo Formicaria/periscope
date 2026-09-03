@@ -61,7 +61,7 @@ async def teardown(rt: Runtime, *names: str):
 
 
 def routes(rt: Runtime) -> set[tuple[str, str]]:
-    return {(r.method, r.resource.canonical) for r in rt.webhook.app.router.routes()}
+    return set(rt.webhook._routes)
 
 
 class FakeInteraction:
@@ -393,7 +393,7 @@ async def test_v1_bot_keeps_single_arr_group(tmp_path):
     g = b.tree.get_command("arr")
     assert {c.name for c in g.commands} == {"queue", "remove", "calendar", "search", "health", "clients", "nowplaying"}
     assert [c.name for c in b.tree.get_commands()] == ["arr"]
-    assert {p for m, p in {(r.method, r.resource.canonical) for r in b.webhook.app.router.routes()} if m == "POST"} == \
+    assert {p for m, p in b.webhook._routes if m == "POST"} == \
         {"/sonarr", "/radarr", "/lidarr", "/prowlarr"}
     assert b.svc is b.media_hub.svc and b.svc.names() == ["sonarr", "plex"] and not b.media_hub.split
     assert b.media_hub.media_cog.board._state._prefix == "board:arr:"       # same state key as before

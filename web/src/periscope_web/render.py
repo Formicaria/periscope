@@ -22,21 +22,32 @@ TEMPLATES = Path(__file__).parent / "templates"
 
 NAV = [
     ("/", "Overview", "grid"),
-    ("/presences", "Presences", "bot"),
+    ("/presences", "Bots", "bot"),
     ("/discord", "Discord", "hash"),
     ("/routing", "Routing", "route"),
     ("/logs", "Logs", "terminal"),
 ]
 
+# the runtime's plain-language states (periscope.runtime) plus the two only the UI knows about
 STATE_BADGE = {
     "running": "badge-success",
-    "connecting": "badge-warning",
+    "starting": "badge-warning",
     "error": "badge-error",
-    "skipped": "badge-warning",
-    "pending": "badge-info",
-    "disabled": "badge-ghost",
-    "missing": "badge-ghost",
+    "needs setup": "badge-warning",
+    "on after restart": "badge-info",
+    "off": "badge-ghost",
+    "not installed": "badge-ghost",
 }
+
+# where a problem gets fixed: the runtime names a page, the UI knows the URL
+FIX_HREF = {"settings": "/services/{name}", "bots": "/presences", "logs": "/logs?q={name}", "discord": "/discord"}
+FIX_LABEL = {"settings": "open settings", "bots": "open Bots", "logs": "open the log", "discord": "open Discord settings"}
+
+
+def fix_link(fix: str | None, name: str) -> tuple[str, str] | None:
+    if not fix or fix not in FIX_HREF:
+        return None
+    return FIX_HREF[fix].format(name=name), FIX_LABEL[fix]
 
 
 def _env() -> Environment:
@@ -46,6 +57,7 @@ def _env() -> Environment:
     env.globals["version"] = __version__
     env.globals["nav"] = NAV
     env.globals["state_badge"] = lambda s: STATE_BADGE.get(s, "badge-ghost")
+    env.globals["fix_link"] = fix_link
     env.globals["now"] = time.time
     return env
 

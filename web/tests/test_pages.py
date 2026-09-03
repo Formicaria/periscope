@@ -13,20 +13,28 @@ async def test_overview_cards_and_states(client):
     assert r.status_code == 200
     html = r.text
     assert 'id="card-pve"' in html and 'id="card-sonarr"' in html and 'id="card-github"' in html
-    assert ">running<" in html and ">skipped<" in html and ">disabled<" in html
-    assert "missing: GITHUB_ORG" in html                      # the skip reason
+    assert ">running<" in html and ">needs setup<" in html and ">off<" in html
+    assert "needs Github Org" in html and "Needs attention" in html and 'href="/services/github"' in html   # the problem + where to fix it
     assert "Infrastructure" in html and "Media" in html and "Dev" in html
-    assert "periscope#0001" in html                           # presence label / connected user
+    assert "periscope#0001" in html                           # bot label / connected user
     assert "restart to apply" not in html                     # store untouched since start
+    assert "Restart</button>" not in html                     # no per-card restart: one button in the header when dirty
 
 
-async def test_enable_disable_cards_update_store_and_flag_restart(client, reload, app):
+async def test_enable_disable_cards_update_store_and_flag_restart(client, reload, app, store):
+    # switching on a service whose required settings are empty goes to its settings page instead
     r = await client.post("/services/sonarr/enable", headers=HX)
-    assert r.status_code == 200 and 'id="card-sonarr"' in r.text and "Disable" in r.text
-    assert "still missing SONARR_URL" in r.text              # OOB toast says what is still missing
+    assert r.status_code == 200 and r.headers.get("HX-Redirect") == "/services/sonarr"
+    assert reload().services["sonarr"]["enabled"] is False
+    store.update_service_env("sonarr", {"SONARR_URL": "https://s", "SONARR_API_KEY": "k"})
+    store.presences["arr"]["token"] = "good-token-abc"
+    store.save()
+    r = await client.post("/services/sonarr/enable", headers=HX)
+    assert r.status_code == 200 and 'id="card-sonarr"' in r.text and "Switch off" in r.text
+    assert "next restart" in r.text                           # OOB toast: on, starts on restart
     assert reload().services["sonarr"]["enabled"] is True and app.state.dirty()
     r = await client.post("/services/pve/disable", headers=HX)
-    assert r.status_code == 200 and "Enable" in r.text
+    assert r.status_code == 200 and "Switch on" in r.text
     assert reload().services["pve"]["enabled"] is False
     r = await client.get("/")
     assert "restart to apply" in r.text
@@ -99,10 +107,10 @@ async def test_service_save_validates(client, reload):
     assert reload().services["pve"]["env"]["PVE_CPU_WARN"] == "90"                    # nothing written
     # a disabled service may be saved incomplete (configure incrementally); the toast says what is still needed
     r = await client.post("/services/pve", data={"PVE_URL": "", "PVE_CPU_WARN": "80"}, headers=HX)
-    assert r.status_code == 200 and "still needed before enabling: PVE_URL" in r.text
+    assert r.status_code == 200 and "still needed before switching on: Pve Url" in r.text
     assert reload().services["pve"]["env"]["PVE_CPU_WARN"] == "80"
     r = await client.post("/services/pve", data={"PVE_URL": "https://x", "_presence": "ghost"}, headers=HX)
-    assert r.status_code == 422 and "unknown presence" in r.text
+    assert r.status_code == 422 and "unknown bot" in r.text
 
 
 async def test_check_with_submitted_values_does_not_save(client, monkeypatch, app, reload):
@@ -127,7 +135,7 @@ async def test_presences_page_add_token_invite(client, reload, api_calls):
     r = await client.get("/presences")
     assert r.status_code == 200 and "good-token-abc" not in r.text
     assert ">set<" in r.text and ">missing<" in r.text and "online" in r.text and "periscope#0001" in r.text
-    assert 'class="badge badge-sm badge-outline mono mr-1">pve<' in r.text            # services using the presence
+    assert 'mono mr-1" title="switched on">pve<' in r.text                              # services using the bot
     r = await client.post("/presences", data={"name": "Bad Name"}, headers=HX)
     assert r.status_code == 422
     r = await client.post("/presences", data={"name": "plex", "label": "Plex bot"}, headers=HX)
@@ -151,7 +159,7 @@ async def test_presences_rename_and_remove(client, reload):
     s = reload()
     assert "arr" not in s.presences and s.presences["media"]["label"] == "Arr stack" and s.services["sonarr"]["presence"] == "media"
     r = await client.post("/presences/default/delete", headers=HX)
-    assert r.status_code == 422 and "cannot be removed" in r.text
+    assert r.status_code == 422 and "cannot be removed" in r.text                        # the only bot with a token
     r = await client.post("/presences/media/delete", headers=HX)
     assert r.status_code == 200
     s = reload()

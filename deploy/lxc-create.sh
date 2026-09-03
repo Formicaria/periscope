@@ -58,7 +58,6 @@ cat <<EOM
 ✔ periscope installed in CT $CTID ($CT_IP) at /opt/periscope — running, nothing enabled yet.
 
 Next:
-  periscope web                  # open the admin UI (port 8090) — sign in with the setup token:
-  journalctl -u periscope | grep 'setup token' | tail -1
-  paste a bot token, pick the server, create the channel layout, enable the services you run.
+  periscope web                  # prints the admin UI address (port 8090) and a one-time sign-in link
+  paste a bot token, pick the server, create the channel layout, switch on the services you run.
 EOM

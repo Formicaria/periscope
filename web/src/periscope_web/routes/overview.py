@@ -1,4 +1,5 @@
-"""Overview: every service as a card, Enable/Disable/Test per card, whole-process Restart."""
+"""Overview: every service as a card with a plain-language state, a "needs attention" list with a fix link per
+problem, on/off + Test per card, one Restart for the whole process (header) when config changed."""
 
 from __future__ import annotations
 
@@ -10,13 +11,15 @@ from fastapi import APIRouter, HTTPException, Request
 
 from .. import restart
 from ..forms import merged_env, parse_form
-from ..render import flash, is_htmx, partial, redirect, render
+from ..render import fix_link, flash, is_htmx, partial, redirect, render
 from . import save
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 GROUPS = [("infra", "Infrastructure"), ("media", "Media"), ("dev", "Dev")]
+
+OFF, PENDING, NOT_INSTALLED = "off", "on after restart", "not installed"
 
 
 def service_card(request: Request, name: str, status: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -29,27 +32,51 @@ def service_card(request: Request, name: str, status: dict[str, Any] | None = No
     svc = store.services.get(name) or {}
     enabled = bool(svc.get("enabled"))
     live = status.get("services", {}).get(name)
-    presence = svc.get("presence") or (spec.default_presence if spec else "default")
+    presence = store.presence_for(name)
+    pinfo = store.presences.get(presence) or {}
+    problem: str | None = None
+    fix: str | None = None
     if spec is None:
-        state, detail = "missing", "package not installed"
+        state = NOT_INSTALLED
+        problem = "the package for this service is not installed — run periscope update"
+    elif not enabled:
+        state = OFF
     elif live:
-        state, detail = str(live.get("state")), str(live.get("error") or "")
-        if not enabled and state != "skipped":
-            detail = detail or "disabled — stops on restart"
-    elif enabled:
-        state, detail = "pending", "enabled — starts on restart"
+        state = str(live.get("state"))
+        if state != "running":
+            problem, fix = live.get("error"), live.get("fix")
     else:
-        state, detail = "disabled", ""
+        state = PENDING
+        problem = "switched on — starts on the next restart"
+    if enabled and spec is not None and state in (OFF, PENDING, "needs setup"):
+        # the runtime only knows about the last start; say now what would block the next one
+        missing = spec.required_missing(store.env_for(name))
+        if missing:
+            labels = [(spec.setting(k).label if spec.setting(k) else k) for k in missing]
+            problem, fix, state = "needs " + ", ".join(labels), "settings", "needs setup"
+        elif not pinfo.get("token"):
+            problem, fix, state = f"no bot token yet (bot '{presence}')", "bots", "needs setup"
+    link = fix_link(fix, name)
     presence_user = status.get("presences", {}).get(presence, {}).get("user")
     return {
         "name": name, "title": spec.title if spec else name, "description": spec.description if spec else "",
         "group": spec.group if spec else "infra", "slash": spec.slash if spec else "", "installed": spec is not None,
-        "state": state, "detail": detail, "enabled": enabled, "presence": presence, "presence_user": presence_user,
-        "presence_label": store.presences.get(presence, {}).get("label") or presence,
+        "state": state, "enabled": enabled, "presence": presence, "presence_user": presence_user,
+        "presence_label": pinfo.get("label") or presence, "presence_has_token": bool(pinfo.get("token")),
         "has_check": bool(spec and spec.check), "needs_webhook": bool(spec and spec.needs_webhook),
         "webhook_paths": list(spec.webhook_paths) if spec else [],
-        "error": (live or {}).get("error") if live and live.get("state") == "error" else None,
+        "problem": problem, "fix_href": link[0] if link else None, "fix_label": link[1] if link else None,
+        "starting": state == "starting",
     }
+
+
+def _presence_chips(store, status: dict[str, Any]) -> list[dict[str, Any]]:
+    chips = []
+    for pname, p in status.get("presences", {}).items():
+        chips.append({"name": pname, "label": store.presences.get(pname, {}).get("label") or pname, "user": p.get("user"),
+                      "connected": bool(p.get("connected")), "error": p.get("error"), "invite": p.get("invite"),
+                      "services": p.get("services") or []})
+    return chips
 
 
 @router.get("/")
@@ -66,10 +93,17 @@ async def overview(request: Request):
     other = [c for c in cards if c["group"] not in {k for k, _ in GROUPS}]
     if other:
         groups.append(("other", "Other", other))
+    chips = _presence_chips(store, status)
+    bot_errors = {c["error"] for c in chips if not c["connected"] and c["error"]}
+    # one line per bot that is down (not one per service riding on it), then every service-level problem
+    attention = [{"name": c["name"], "title": f"bot {c['label']}", "problem": c["error"], "fix_href": "/presences",
+                  "fix_label": "open Bots", "state": "error"} for c in chips if not c["connected"] and c["error"]]
+    attention += [c for c in cards if c["enabled"] and c["problem"] and not c["starting"] and c["state"] != PENDING
+                  and c["problem"] not in bot_errors]
     counts = {"running": sum(1 for c in cards if c["state"] == "running"), "enabled": sum(1 for c in cards if c["enabled"]),
-              "problems": sum(1 for c in cards if c["state"] in ("error", "skipped"))}
+              "problems": len(attention)}
     return render(request, "overview.html", {"groups": [g for g in groups if g[2]], "status": status, "counts": counts,
-                                             "presences": status.get("presences", {})})
+                                             "chips": chips, "attention": attention})
 
 
 def _card_response(request: Request, name: str):
@@ -80,21 +114,26 @@ def _card_response(request: Request, name: str):
 
 @router.post("/services/{name}/enable")
 async def enable(request: Request, name: str):
+    """Switch a service on. When its required settings are still empty, go to its settings page instead of
+    switching on something that would only be skipped."""
     st = request.app.state
     runtime = st.runtime
+    store = runtime.store
     spec = runtime.specs.get(name)
     if spec is None:
         raise HTTPException(404, f"unknown service {name}")
-    svc = runtime.store.service(name)
-    if not svc.get("presence"):
-        svc["presence"] = spec.default_presence
-    missing = spec.required_missing(runtime.store.env_for(name))
-    runtime.store.set_enabled(name, True)
-    save(request)
+    svc = store.service(name)
+    missing = spec.required_missing(store.env_for(name))
     if missing:
-        flash(request, f"{spec.title} enabled — still missing {', '.join(missing)}; it will be skipped until set", "warning")
-    else:
-        flash(request, f"{spec.title} enabled — restart to apply", "success")
+        labels = [(spec.setting(k).label if spec.setting(k) else k) for k in missing]
+        flash(request, f"{spec.title} needs {', '.join(labels)} first — fill them in and save with the switch on", "info")
+        return redirect(request, f"/services/{name}")
+    if not store.token_for(name):
+        flash(request, f"{spec.title} has no bot to post as yet — add a bot token first", "info")
+        return redirect(request, "/presences")
+    store.set_enabled(name, True)
+    save(request)
+    flash(request, f"{spec.title} is on — it starts on the next restart (button in the header)", "success")
     return _card_response(request, name)
 
 
@@ -106,7 +145,7 @@ async def disable(request: Request, name: str):
         raise HTTPException(404, f"unknown service {name}")
     store.set_enabled(name, False)
     save(request)
-    flash(request, f"{name} disabled — restart to apply", "info")
+    flash(request, f"{name} is off — it stops on the next restart", "info")
     return _card_response(request, name)
 
 
