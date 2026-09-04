@@ -1,8 +1,15 @@
 # Changelog
 
-Every release is a tag (`vX.Y.Z`) whose section here becomes the GitHub release notes. Bump
-`core/src/periscope/__init__.py` (and the two `pyproject.toml` files) to match before tagging — the release
-workflow refuses a tag that does not.
+Every release is a tag (`vX.Y.Z`) whose section here becomes the GitHub release notes. Every package in the
+repo carries the same version — the eight `__init__.py` files and the eight `pyproject.toml` files — and the
+release workflow refuses a tag that disagrees with any of them or has no section here.
+
+## v0.1.2
+
+**THE INSTALL WOULD NOT UPDATE.** Renumbering to 0.1.1 left every package still requiring `periscope>=1.0`, so
+`periscope update` stopped at "conflicting dependencies" and nothing was installed. Core, the web UI and all six
+service packages now carry the same version and require `periscope>=0.1`, and the release workflow refuses a tag
+unless every `__init__.py` and every `pyproject.toml` in the repo agrees with it — this cannot ship again.
 
 ## v0.1.1
 

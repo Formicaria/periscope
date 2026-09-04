@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "periscope_unifi"
-version = "1.0.0"
+version = "0.1.2"
 description = "periscope bot: UniFi network monitoring (status board, alerts, clients, devices)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
-    "periscope>=1.0",
+    "periscope>=0.1",
 ]
 
 [project.optional-dependencies]

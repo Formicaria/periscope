@@ -1,3 +1,3 @@
 """periscope_prometheus — Discord bridge for Prometheus, Alertmanager and Grafana."""
 
-__version__ = "1.0.0"
+__version__ = "0.1.2"

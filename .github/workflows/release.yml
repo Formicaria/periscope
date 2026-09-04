@@ -38,11 +38,19 @@ jobs:
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
           TAG_VERSION="${TAG#v}"
-          CODE_VERSION=$(grep -oP '(?<=^__version__ = ")[^"]+' core/src/periscope/__init__.py)
-          WEB_VERSION=$(grep -oP '(?<=^__version__ = ")[^"]+' web/src/periscope_web/__init__.py)
-          echo "tag $TAG_VERSION · core $CODE_VERSION · web $WEB_VERSION"
-          if [ "$TAG_VERSION" != "$CODE_VERSION" ] || [ "$TAG_VERSION" != "$WEB_VERSION" ]; then
-            echo "::error::$TAG does not match __version__ (core $CODE_VERSION, web $WEB_VERSION). Bump, commit, re-tag."
+          BAD=""
+          for f in core/src/periscope/__init__.py web/src/periscope_web/__init__.py bots/*/src/*/__init__.py; do
+            V=$(grep -oP '(?<=^__version__ = ")[^"]+' "$f" || true)
+            echo "  $f = $V"
+            [ "$V" = "$TAG_VERSION" ] || BAD="$BAD $f($V)"
+          done
+          for f in core/pyproject.toml web/pyproject.toml bots/*/pyproject.toml; do
+            V=$(grep -m1 -oP '(?<=^version = ")[^"]+' "$f")
+            echo "  $f = $V"
+            [ "$V" = "$TAG_VERSION" ] || BAD="$BAD $f($V)"
+          done
+          if [ -n "$BAD" ]; then
+            echo "::error::$TAG does not match:$BAD — every package carries the same version. Bump, commit, re-tag."
             exit 1
           fi
           if ! grep -q "^## v${TAG_VERSION}\$" CHANGELOG.md; then

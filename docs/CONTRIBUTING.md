@@ -50,8 +50,14 @@ Tag `vX.Y.Z` on `main`; `docker.yml` pushes `ghcr.io/formicaria/periscope-<name>
 
 Every change ships as a release, the way the other Formicaria repos do it:
 
-1. Bump the version in `core/src/periscope/__init__.py`, `web/src/periscope_web/__init__.py`,
-   `core/pyproject.toml` and `web/pyproject.toml` — all four carry the same number.
+1. Bump the version everywhere it appears — `core`, `web` and every `bots/*` package carry the same number, in
+   both their `__init__.py` and their `pyproject.toml`:
+
+```bash
+V=0.1.2
+sed -i "s/^__version__ = \".*\"/__version__ = \"$V\"/" core/src/periscope/__init__.py web/src/periscope_web/__init__.py bots/*/src/*/__init__.py
+sed -i "0,/^version = \".*\"/s//version = \"$V\"/" core/pyproject.toml web/pyproject.toml bots/*/pyproject.toml
+```
 2. Add a `## vX.Y.Z` section at the top of `CHANGELOG.md` saying what changed and why.
 3. Commit, then tag and push the tag:
 
