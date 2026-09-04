@@ -163,7 +163,7 @@ async def test_reset_from_the_editor_goes_back_to_the_page(client, runtime):
 
 async def test_a_message_save_never_asks_for_a_restart(client, app):
     await client.post(f"/messages/{BUSY}", data=simple_form(title="new"), headers=HX)
-    assert app.state.changed is False
+    assert app.state.pending == [] and app.state.dirty() is False
     r = await client.get("/messages")
     assert "restart to apply" not in r.text
 

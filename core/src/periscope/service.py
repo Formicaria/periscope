@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from .alerts import AlertRouter
 from .config import Settings
+from .hooks import NullHistory, NullWindows
 from .messages import Messages, MessageStore
 from .state import JsonState, NamespacedState
 
@@ -139,7 +140,8 @@ class ServiceBot:
     """What a service's cogs see as `bot`. Same attribute surface as v1's LabBot, backed by a shared presence."""
 
     def __init__(self, spec: ServiceSpec, presence: "Presence", settings: Settings, env: dict[str, str],
-                 state: JsonState, webhook: "WebhookServer | None", messages: MessageStore | None = None):
+                 state: JsonState, webhook: "WebhookServer | None", messages: MessageStore | None = None,
+                 history: Any = None, windows: Any = None):
         self.spec = spec
         self.name = spec.name
         self.presence = presence
@@ -151,6 +153,9 @@ class ServiceBot:
         self.shared_state: NamespacedState = state.namespace(f"presence:{presence.name}")
         # the user's customisations of this service's posts (config/messages.yaml), applied at send time
         self.messages = Messages(messages, service=spec.name, lab=settings.lab_name)
+        # always present, no-ops until the event log / maintenance windows are configured (periscope.hooks)
+        self.history = history if history is not None else NullHistory()
+        self.windows = windows if windows is not None else NullWindows()
         self.alerts = AlertRouter(self)
         self.webhook = webhook
         self.description = spec.description
@@ -234,12 +239,35 @@ class ServiceBot:
         return self.presence.get_cog(f"{self.name}:{name}")
 
     async def unload(self) -> None:
+        """Take everything this service put on the presence back off: cogs, its slash group, webhook routes and
+        any client it left on itself — so the same service can be built again from fresh settings."""
         for cog in self._cogs:
             try:
                 await self.presence.remove_cog(cog.qualified_name)
             except Exception:  # noqa: BLE001
                 log.debug("[%s] remove_cog failed", self.name, exc_info=True)
         self._cogs.clear()
+        for path in list(self.spec.webhook_paths):
+            if self.webhook is not None:
+                self.webhook.remove_route("POST", path)
+        group = (self.spec.slash or "").lstrip("/").split(" ")[0]
+        if group:
+            try:
+                self.presence.tree.remove_command(group)
+            except Exception:  # noqa: BLE001
+                log.debug("[%s] remove_command %s failed", self.name, group, exc_info=True)
+        for attr in ("close", "aclose"):
+            client = getattr(self, "_client", None)
+            fn = getattr(client, attr, None) if client is not None else None
+            if fn is not None:
+                try:
+                    result = fn()
+                    if hasattr(result, "__await__"):
+                        await result
+                except Exception:  # noqa: BLE001
+                    log.debug("[%s] closing its client failed", self.name, exc_info=True)
+                break
+        self.built = False
 
     def __getattr__(self, item: str):
         # anything else a cog asks of "bot" (add_view, wait_for, http, application_id, …) is the presence's

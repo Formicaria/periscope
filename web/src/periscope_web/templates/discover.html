@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Find my services{% endblock %}
+{% block content %}
+<div class="max-w-4xl space-y-4">
+  <div>
+    <h2 class="text-lg font-semibold">Find my services</h2>
+    <p class="text-sm opacity-70 mt-1">
+      Knock on the addresses on your network and see which of them answer like something periscope can talk to,
+      then fill that service's settings in for you. A scan only ever runs when you press the button on this page —
+      periscope never goes looking on its own, and it only reads the public version endpoint each product offers,
+      without signing in to anything.
+    </p>
+  </div>
+
+  {# ---- scan ---- #}
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4 gap-3">
+      <h3 class="font-semibold">Scan my network</h3>
+      <form hx-post="/discover/scan" hx-target="#found-list" hx-swap="outerHTML" hx-indicator="this" method="post"
+            action="/discover/scan" class="flex flex-wrap gap-2 items-end">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label class="form-control flex-1 min-w-72">
+          <span class="label-text text-xs opacity-70 pb-1">Addresses to try — one range or a few, comma separated</span>
+          <input name="hosts" value="{{ hosts }}" class="input input-bordered input-sm mono w-full"
+                 placeholder="192.168.1.0/24" autocomplete="off">
+        </label>
+        <button class="btn btn-primary btn-sm" {% if job.running %}disabled{% endif %}>
+          <span class="htmx-indicator loading loading-spinner loading-xs"></span>Scan my network</button>
+      </form>
+      <p class="text-xs opacity-60">
+        Guessed from this box's own addresses, and editable. A <span class="mono">/24</span> is 254 addresses and
+        takes a few seconds; anything over 1024 is refused. Only the ports these products normally use are tried.
+      </p>
+    </div>
+  </div>
+
+  {# ---- results ---- #}
+  {% include "partials/found_list.html" %}
+
+  {# ---- files ---- #}
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4 gap-3">
+      <h3 class="font-semibold">Or read it out of a file</h3>
+      <p class="text-xs opacity-70">
+        For anything the scan cannot reach — a service on a different network, or one behind Docker with no
+        published port. A compose file or an *arr <span class="mono">config.xml</span> often carries the API key
+        too, which saves you copying it. Keys read this way are written straight to your settings; this page will
+        only ever tell you that one was found, never show it.
+      </p>
+      <form hx-post="/discover/import" hx-target="#found-list" hx-swap="outerHTML" hx-indicator="this" method="post"
+            action="/discover/import" class="space-y-2">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label class="form-control">
+          <span class="label-text text-xs opacity-70 pb-1">Paste a docker-compose.yml</span>
+          <textarea name="compose" rows="6" class="textarea textarea-bordered textarea-sm mono w-full"
+                    placeholder="services:&#10;  sonarr:&#10;    image: linuxserver/sonarr&#10;    ports: [&quot;8989:8989&quot;]"></textarea>
+        </label>
+        <div class="flex flex-wrap gap-2 items-end">
+          <label class="form-control flex-1 min-w-56">
+            <span class="label-text text-xs opacity-70 pb-1">Host to put in those URLs</span>
+            <input name="compose_host" value="localhost" class="input input-bordered input-sm mono w-full">
+          </label>
+          <label class="form-control flex-1 min-w-56">
+            <span class="label-text text-xs opacity-70 pb-1">…or a folder of *arr configs on this box</span>
+            <input name="config_dir" class="input input-bordered input-sm mono w-full"
+                   placeholder="/opt/appdata" autocomplete="off">
+          </label>
+          <button class="btn btn-sm">
+            <span class="htmx-indicator loading loading-spinner loading-xs"></span>Read it</button>
+        </div>
+      </form>
+      <p class="text-xs opacity-60">
+        The folder is read on the machine periscope runs on. Point it at the parent —
+        <span class="mono">/opt/appdata</span> when your configs live in
+        <span class="mono">/opt/appdata/sonarr/config.xml</span>.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

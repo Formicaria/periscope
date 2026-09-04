@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 import discord
+from periscope.hooks import NullHistory
 from discord import app_commands
 from discord.ext import commands
 
@@ -15,6 +16,8 @@ from ..common import INVITE_KIND, RESULT_PREFIX, check_cooldown, find_email, is_
 from ..context import PlexRequests, slash
 
 log = logging.getLogger(__name__)
+# a bot assembled by hand (a test, a bare install) has no event log; recording is never worth a crash
+NO_LOG = NullHistory()
 
 INVITE_CUSTOM_ID = "plexrequests:invite"
 LEGACY_INVITE_CUSTOM_ID = "ztplex:invite"      # buttons on embeds posted by the standalone bot keep working
@@ -53,6 +56,7 @@ class InviteView(discord.ui.View):
 class InvitesCog(commands.Cog):
     def __init__(self, bot: Any):
         self.bot = bot
+        self.history = getattr(bot, "history", NO_LOG)   # a no-op when this bot has none
         self.ctx: PlexRequests = bot.plexreq
         self.cfg = self.ctx.cfg
         self._ready_once = False
@@ -113,6 +117,10 @@ class InvitesCog(commands.Cog):
         status, detail = await asyncio.to_thread(self.ctx.plex.invite, email)
         log.info("invite: discord=%s (%s) -> %s", member, member.id, status)
         self.ctx.stats.bump(f"invite_{status}", member)
+        self.history.record(service="plexrequests", kind="invite", key=status, server=self.bot.lab_name,
+                            severity="warning" if status == "error" else "info",
+                            title=f"Plex invite {status} for {getattr(member, 'display_name', member)}",
+                            payload={"user_id": str(getattr(member, "id", ""))})
 
         role_note = ""
         if status in ("sent", "pending", "updated"):

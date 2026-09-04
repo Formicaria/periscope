@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "periscope_proxmox"
-version = "0.1.2"
+version = "0.2.0"
 description = "periscope bot for Proxmox VE: live cluster dashboard, threshold alerts, backup watcher, VM/CT control."
 readme = "README.md"
 license = { text = "MIT" }

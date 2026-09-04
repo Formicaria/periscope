@@ -1,3 +1,3 @@
 """periscope_plexrequests — Plex invites, media requests, status board, new-on-Plex feed and auto-revoke for Discord."""
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "periscope_docker"
+version = "0.2.0"
+description = "periscope bot: Docker container monitoring (status board, alerts, logs, stats, image updates)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "periscope>=0.1",
+    "aiohttp>=3.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+periscope-docker = "periscope_docker.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

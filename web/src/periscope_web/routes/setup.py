@@ -1,10 +1,16 @@
-"""/setup: the first-run flow — token → invite → pick server → channel layout → add services."""
+"""/setup: the first-run flow — token → invite → pick server → channel layout → add services.
+
+Between the layout and the services there is an optional step that offers to go and find the services already
+running here (see routes/discover.py). It is skippable on purpose: it is a convenience, not a requirement, so
+it never counts towards whether setup is finished.
+"""
 
 from __future__ import annotations
 
 import logging
 
 from fastapi import APIRouter, Request
+from periscope.discovery import default_hosts
 from periscope.layout import ensure_layout, layout_status
 
 from ..discordapi import DiscordError, invite_url
@@ -39,11 +45,15 @@ async def _ctx(request: Request) -> dict:
     enabled = store.enabled_services()
     steps = {"token": bool(tokens), "guild": bool(guild_id), "layout": bool(layout and not layout["missing_channels"]),
              "services": bool(enabled)}
+    # the optional discovery step: what the last scan on /discover turned up, if there was one
+    job = getattr(st, "discovery_job", None)
     return {
         "steps": steps, "presence": first, "app_id": app_id, "invite": invite_url(app_id) if app_id else None,
         "guilds": guilds, "guild_error": guild_error, "guild_id": guild_id, "layout": layout,
         "specs": sorted(runtime.specs.values(), key=lambda s: (s.group, s.name)), "enabled": enabled,
         "current": next((k for k, v in steps.items() if not v), "done"),
+        "discovery": {"ran": bool(job and job.state in ("done", "failed")), "running": bool(job and job.running),
+                      "hosts": ", ".join(default_hosts()), "found": len(job.everything) if job else 0},
     }
 
 

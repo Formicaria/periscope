@@ -1,0 +1,71 @@
+{# One thing the scan (or a file) turned up: what it is, where it answered, and what Use this would fill in.
+   `row` is already redacted — a key it would write shows up as a badge, never as a value. #}
+<div class="flex flex-wrap items-center gap-2 py-2 border-b border-base-300 last:border-0" id="found-{{ row.service }}">
+  <div class="min-w-48 flex-1">
+    <div class="flex items-center gap-2">
+      <span class="font-medium">{{ row.title }}</span>
+      {% if row.found and row.found.version %}<span class="badge badge-ghost badge-xs mono">{{ row.found.version }}</span>{% endif %}
+      {% if row.enabled %}<span class="badge badge-success badge-xs">on</span>
+      {% elif row.already_configured %}<span class="badge badge-info badge-xs">already set up</span>{% endif %}
+      {% if not row.installed %}<span class="badge badge-ghost badge-xs">not installed</span>{% endif %}
+    </div>
+    <div class="text-xs opacity-60 mono break-all">{{ row.url or (row.found.where if row.found else '') }}</div>
+    {% if row.found %}
+    <div class="text-xs opacity-50">
+      {% if row.found.source == 'compose' %}from the compose file
+      {% elif row.found.source == 'config' %}from its config.xml
+      {% else %}answered on the network{% endif %}
+      {% if row.found.confidence == 'family' %} · named from its port{% endif %}
+      {% if row.found.note %} · {{ row.found.note }}{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="flex flex-col items-end gap-1 text-xs">
+    {% if row.has_secret %}<span class="badge badge-warning badge-sm">found an API key</span>{% endif %}
+    {% if row.writes %}
+    <span class="opacity-60">fills in <span class="mono">{{ row.writes | join(', ') }}</span></span>
+    {% endif %}
+    {% if row.skipped %}
+    <span class="opacity-50">leaves <span class="mono">{{ row.skipped.keys() | join(', ') }}</span> as it is</span>
+    {% endif %}
+  </div>
+
+  <div class="flex items-center gap-1">
+    {% if not row.installed %}
+    <span class="text-xs opacity-60">no package for this on this box</span>
+    {% elif row.writes_nothing %}
+    <a href="/services/{{ row.service }}" class="btn btn-ghost btn-xs">Open settings</a>
+    <form hx-post="/discover/use/{{ row.service }}" hx-target="#found-list" hx-swap="outerHTML" method="post"
+          action="/discover/use/{{ row.service }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="overwrite" value="1">
+      <button class="btn btn-ghost btn-xs" title="replace the settings already saved for this service">Replace</button>
+    </form>
+    {% else %}
+    <form hx-post="/discover/use/{{ row.service }}" hx-target="#found-list" hx-swap="outerHTML" hx-indicator="this"
+          method="post" action="/discover/use/{{ row.service }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn btn-primary btn-xs">
+        <span class="htmx-indicator loading loading-spinner loading-xs"></span>Use this</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if checked and checked.service == row.service %}
+  <div class="basis-full">
+    <div class="alert {{ 'alert-success' if checked.ok else ('alert-error' if checked.ok is false else 'alert-info') }} py-2 px-3 text-xs">
+      <span>{{ '✔' if checked.ok else ('✖' if checked.ok is false else 'ℹ') }} {{ checked.message }}</span>
+      {% if checked.ok and not row.enabled %}
+      <form hx-post="/discover/enable/{{ row.service }}" hx-target="#found-list" hx-swap="outerHTML" method="post"
+            action="/discover/enable/{{ row.service }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn btn-success btn-xs">Switch it on</button>
+      </form>
+      {% elif checked.ok is false %}
+      <a href="/services/{{ row.service }}" class="link text-xs">open its settings</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

@@ -11,6 +11,7 @@ from discord.ext import commands
 
 from .alerts import AlertRouter
 from .config import Settings
+from .hooks import history_for, windows_for
 from .logging import setup_logging
 from .messages import Messages, MessageStore
 from .state import JsonState
@@ -44,6 +45,8 @@ class LabBot(commands.Bot):
         self.lab_name = settings.lab_name
         self.state = JsonState(settings.data_dir / "state.json")
         self.messages = Messages(MessageStore(settings.data_dir.parent / "config" / "messages.yaml"), lab=settings.lab_name)
+        self.history = history_for(settings.data_dir / "history.db")
+        self.windows = windows_for(settings.data_dir.parent / "config" / "maintenance.yaml")
         self.alerts = AlertRouter(self)
         self._cog_paths = list(cogs)
         self.webhook: WebhookServer | None = (

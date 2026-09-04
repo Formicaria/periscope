@@ -7,7 +7,7 @@ CMD="$1"; shift
 svc() { exec "$PY" -m periscope.cli "$DIR" "$CMD" "$@"; }
 
 case "$CMD" in
-    list|status|enable|disable|check|config|presence|bots|web|init) svc "$@" ;;
+    list|status|enable|disable|check|config|presence|bots|web|reload|init) svc "$@" ;;
     layout)  exec "$PY" "$DIR/scripts/git_layout.py" "$@" ;;
     update)  exec bash "$DIR/update.sh" ;;
     logs)    if [ -n "$1" ]; then exec journalctl -u periscope -f -o cat | grep --line-buffered -i -E "\[$1\]|periscope_$1|$1"; else exec journalctl -u periscope -f; fi ;;
@@ -33,6 +33,7 @@ PY
     bots [add|token|use]    the Discord bot identities services post as (alias: presence)
     init                    first-run: paste a bot token, pick the server, create channels — or use the web UI
     layout                  apply the #git-* / #op-* channel convention (see --help)
+    reload                  apply the config to the running process now (settings apply by themselves anyway)
     status                  raw runtime status (bots, services, errors) as JSON
     logs [svc]              follow the runtime log, optionally one service
     restart | start | stop  the periscope service

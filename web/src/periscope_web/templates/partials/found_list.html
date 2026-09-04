@@ -1,0 +1,51 @@
+{# The results panel. While a scan is running this polls itself; once the job is finished the polling stops
+   because the swapped-in copy no longer carries an hx-trigger. #}
+<div id="found-list" class="card bg-base-200 shadow-sm"
+     {% if job.running %}hx-get="/discover/results" hx-trigger="every {{ poll_ms }}ms" hx-swap="outerHTML"{% endif %}>
+  <div class="card-body p-4 gap-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <h3 class="font-semibold">What is out there</h3>
+      {% if job.running %}
+      <span class="loading loading-spinner loading-xs"></span>
+      <span class="text-xs opacity-70">scanning {{ job.hosts }} — {{ '%.0f' | format(job.elapsed) }}s so far</span>
+      {% elif job.state == 'failed' %}
+      <span class="badge badge-error badge-sm">scan stopped</span>
+      {% elif job.state == 'done' %}
+      <span class="text-xs opacity-60 ml-auto">scanned {{ job.hosts }} in {{ '%.1f' | format(job.elapsed) }}s</span>
+      {% endif %}
+    </div>
+
+    {% if job.error %}
+    <div class="alert alert-error py-2 px-3 text-xs"><span>{{ job.error }}</span></div>
+    {% endif %}
+
+    {% if rows %}
+    <div>
+      {% for row in rows %}
+      {% include "partials/found_row.html" %}
+      {% endfor %}
+    </div>
+    <p class="text-xs opacity-60">
+      <b>Use this</b> fills in the settings that are still empty, then runs that service's own test. Anything you
+      already typed is left alone — <b>Replace</b> on a service that is already set up is the only thing that
+      overwrites it.
+    </p>
+    {% elif job.running %}
+    <p class="text-sm opacity-70">Knocking on each address in turn. Results appear here as they come in.</p>
+    {% elif job.state == 'done' %}
+    <p class="text-sm opacity-70">Nothing answered on {{ job.hosts }}. If a service runs on another subnet, put its
+      range in the box above; if it is behind Docker on this box, paste its compose file below.</p>
+    {% elif job.state == 'failed' %}
+    <p class="text-sm opacity-70">Fix the range above and try again.</p>
+    {% else %}
+    <p class="text-sm opacity-70">Nothing scanned yet. Press <b>Scan my network</b>, or paste a compose file below.</p>
+    {% endif %}
+
+    {% if extras %}
+    <div class="text-xs opacity-60">
+      Also answered, but periscope has no service for them:
+      {% for e in extras %}<span class="mono">{{ e.title }}{% if e.where %} ({{ e.where }}){% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>

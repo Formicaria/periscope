@@ -10,12 +10,15 @@ from typing import Any
 
 import discord
 from periscope import Alert, LabBot, Severity
+from periscope.hooks import NullHistory
 
 from .config import GithubSettings
 from .messages import feed_kind
 from .render import ci_transition, event_ctx, is_bot_sender, one_liner, render, render_event, repo_name
 
 log = logging.getLogger(__name__)
+# a bot assembled by hand (a test, a bare install) has no event log; recording is never worth a crash
+NO_LOG = NullHistory()
 
 RECENT_MAX = 10
 ACTIVITY_WINDOW_S = 24 * 3600
@@ -26,6 +29,7 @@ class Dispatcher:
 
     def __init__(self, bot: LabBot, cfg: GithubSettings):
         self.bot = bot
+        self.history = getattr(bot, "history", NO_LOG)   # a no-op when this bot has none
         self.cfg = cfg
         self.state = bot.state.namespace("gh")
         self._seen: deque[str] = deque(maxlen=2000)
@@ -111,6 +115,9 @@ class Dispatcher:
 
         self.bump(event)
         self.remember(one_liner(event, embed, when))
+        self.history.record(service="github", kind="feed", key=repo_name(payload) or event, detail=event,
+                            title=embed.title or event, server=self.bot.lab_name,
+                            payload={"action": payload.get("action") or "", "via": source})
         targets = self.cfg.channels_for(repo_name(payload), event, self.bot.settings.alert_channel_id)
         if not targets:
             log.warning("no feed channel configured (GITHUB_FEED_CHANNEL_ID / ALERT_CHANNEL_ID); dropping %s", event)
@@ -141,6 +148,10 @@ class Dispatcher:
             return
         kind, fp, info = tr
         self._set_ci(info["repo"], info)
+        self.history.record(service="github", kind="ci", key=info["repo"], server=self.bot.lab_name,
+                            severity="ok" if kind == "resolve" else "critical",
+                            title=f"{info['repo']} / {info['name']} {info['conclusion']} on {info['branch']}",
+                            detail=info.get("url") or "", payload={"sha": info.get("sha")})
         if kind == "resolve":
             await self.bot.alerts.resolve(fp, note=f"`{info['sha']}` succeeded")
             return

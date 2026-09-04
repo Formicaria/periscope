@@ -20,7 +20,7 @@
 
 {% if dirty %}
 <div class="alert alert-warning py-2 text-sm mb-4 flex flex-wrap items-center gap-3">
-  <span>Settings changed — they apply when periscope restarts.</span>
+  <span>{{ pending | join('; ') if pending else 'Something needs periscope to start again.' }}</span>
   <form method="post" action="/restart" class="m-0 ml-auto" onsubmit="return confirm('Restart periscope now? Every bot reconnects (about 10 s).')">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="btn btn-warning btn-xs">Restart now</button>

@@ -12,11 +12,14 @@ from typing import Any
 import discord
 from discord.ext import commands, tasks
 from periscope.statusboard import StatusBoard
+from periscope.hooks import NullHistory
 
 from ..common import BOARD_KIND, PLEX_GOLD, fmt_bytes, resolve_channel
 from ..context import PlexRequests
 
 log = logging.getLogger(__name__)
+# a bot assembled by hand (a test, a bare install) has no event log; recording is never worth a crash
+NO_LOG = NullHistory()
 
 STATUS_MESSAGE_KEY = "status_message_id"   # the standalone bot's key, kept in sync for /requests plexstats etc.
 BOARD_KEY = "plex-requests"
@@ -64,6 +67,7 @@ def board_embed(data: dict[str, Any], plex_name: str, now: datetime | None = Non
 class BoardCog(commands.Cog):
     def __init__(self, bot: Any):
         self.bot = bot
+        self.history = getattr(bot, "history", NO_LOG)   # a no-op when this bot has none
         self.ctx: PlexRequests = bot.plexreq
         self.cfg = self.ctx.cfg
         # channel resolved on every tick (name or id); customised as plexrequests.board on the Messages page
@@ -120,6 +124,12 @@ class BoardCog(commands.Cog):
             log.exception("status board build failed")
             return
         self.board.channel_id = channel.id
+        if data["plex_ok"]:
+            self.history.sample(service="plexrequests", metric="streams", value=len(data["streams"]),
+                                server=self.bot.lab_name)
+        for q in (x for x in data["queues"] if x["ok"]):
+            self.history.sample(service="plexrequests", metric="queue", value=q["total"], key=q["app"],
+                                server=self.bot.lab_name)
         try:
             msg = await self.board.render(board_embed(data, self.cfg.plex_name), pin=False, ctx=data)
         except discord.Forbidden:

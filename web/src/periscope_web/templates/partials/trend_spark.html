@@ -1,0 +1,28 @@
+{# One metric as a small chart. `spark.chart` is what routes/trends.py:sparkline() worked out. #}
+{% set c = spark.chart %}
+<div class="rounded-box bg-base-200/60 p-2">
+  <div class="flex items-baseline justify-between gap-2 text-xs">
+    <span class="mono font-medium">{{ spark.metric }}</span>
+    <span class="opacity-60 mono" title="lowest and highest reading in this window">
+      {{ "%.4g" | format(c.min) }}–{{ "%.4g" | format(c.max) }}
+    </span>
+  </div>
+  {% if c.empty %}
+  <div class="text-xs opacity-50 py-2">no readings yet</div>
+  {% else %}
+  <svg viewBox="0 0 {{ c.width }} {{ c.height }}" preserveAspectRatio="none" class="w-full h-10 mt-1"
+       role="img" aria-label="{{ spark.metric }} over time, {{ c.n }} points, latest {{ '%.4g' | format(c.last) }}">
+    <title>{{ spark.metric }}: {{ c.n }} points from {{ c.from }} to {{ c.to }} (UTC)</title>
+    <path d="{{ c.area }}" fill="oklch(var(--p) / 0.18)"/>
+    <path d="{{ c.line }}" fill="none" stroke="oklch(var(--p))" stroke-width="1.5" stroke-linejoin="round"
+          stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    <line x1="{{ '%.1f' | format(c.dot.x) }}" y1="{{ '%.1f' | format(c.dot.y - 4) }}"
+          x2="{{ '%.1f' | format(c.dot.x) }}" y2="{{ '%.1f' | format(c.dot.y + 4) }}"
+          stroke="oklch(var(--p))" stroke-width="2" vector-effect="non-scaling-stroke"/>
+  </svg>
+  <div class="flex items-baseline justify-between gap-2 text-xs mt-1">
+    <span class="opacity-60">now <span class="mono font-medium">{{ "%.4g" | format(c.last) }}</span></span>
+    <span class="opacity-60">average <span class="mono">{{ "%.4g" | format(c.avg) }}</span></span>
+  </div>
+  {% endif %}
+</div>

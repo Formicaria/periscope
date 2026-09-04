@@ -12,8 +12,11 @@ apt-get install -y -qq python3 python3-venv git >/dev/null
 echo "==> Virtualenv + dependencies (core, every service, web UI)"
 [ -d venv ] || python3 -m venv venv
 ./venv/bin/pip install --quiet --upgrade pip
-./venv/bin/pip install --quiet -e core -e web
-for b in bots/*/; do ./venv/bin/pip install --quiet -e "$b"; done
+# one invocation: pip resolves core, the web UI and every service together, so a version bump can never
+# leave the box half-installed on "conflicting dependencies"
+EDITABLES=(-e core -e web)
+for b in bots/*/; do EDITABLES+=(-e "$b"); done
+./venv/bin/pip install --quiet "${EDITABLES[@]}"
 mkdir -p config data
 
 echo "==> Installing the periscope CLI (/usr/local/bin/periscope)"

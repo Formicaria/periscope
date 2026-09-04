@@ -16,11 +16,14 @@ import discord
 from discord.ext import commands, tasks
 
 from periscope import RefreshView, Severity, StatusBoard, human_bytes, lab_embed, progress_bar, status_dot, truncate
+from periscope.hooks import NullHistory
 
 from ..client import note_reachability
 from . import register
 
 log = logging.getLogger(__name__)
+# a bot assembled by hand (a test, a bare install) has no event log; recording is never worth a crash
+NO_LOG = NullHistory()
 
 MediaServer = Literal["plex", "jellyfin"]
 BOARD_KIND = "media.board"    # the message kind the board is customised under (Messages page)
@@ -175,6 +178,7 @@ def board_embed(data: dict[str, Any], lab_name: str | None) -> discord.Embed:
 class Media(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.history = getattr(bot, "history", NO_LOG)   # a no-op when this bot has none
         self.hub = bot.media_hub
         self.hub.media_cog = self
         self.svc = self.hub.svc
@@ -283,6 +287,13 @@ class Media(commands.Cog):
             return
         try:
             data = await self.board_data()
+            for q in data["queues"]:
+                self.history.sample(service="arr", metric="queue", value=q["queued"], key=q["app"],
+                                    server=self.bot.lab_name)
+            self.history.sample(service="arr", metric="streams", value=len(data["streams"]), server=self.bot.lab_name)
+            if data["disk"]:
+                self.history.sample(service="arr", metric="disk", value=data["disk"]["used_pct"],
+                                    server=self.bot.lab_name)
             await self.board.render(board_embed(data, self.bot.lab_name), ctx=data, view=self.view)
         except Exception:
             log.exception("status board render failed")

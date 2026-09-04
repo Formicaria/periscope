@@ -17,8 +17,11 @@ from aiohttp import web
 from discord.ext import commands
 
 from periscope import Alert, Severity, human_bytes, lab_embed, truncate
+from periscope.hooks import NullHistory
 
 log = logging.getLogger(__name__)
+# a bot assembled by hand (a test, a bare install) has no event log; recording is never worth a crash
+NO_LOG = NullHistory()
 
 APPS = ("sonarr", "radarr", "lidarr", "prowlarr")
 
@@ -350,6 +353,11 @@ class Webhooks(commands.Cog):
         if ch is None:
             return
         await ch.send(embed=e)
+        # the log lives on whichever service owns this app; a bot built by hand has none, so fall back
+        getattr(owner, "history", NO_LOG).record(
+            service="arr", kind=kind_for(ev).split(".")[-1], key=ev.app, severity=ev.severity.value,
+            title=truncate(f"{ev.title} {media_title(ev.app, ev.payload)[0]}".strip(), 200),
+            server=owner.lab_name, payload={"event": ev.event_type})
 
 
 async def setup(bot):

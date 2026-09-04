@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings, env_scope
+from .hooks import history_for, windows_for
 from .logging import setup_logging
 from .messages import MessageStore
 from .presence import Presence, build_intents, explain_presence_error
@@ -42,6 +43,9 @@ class Runtime:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.state = JsonState(self.data_dir / "state.json")
         self.messages = MessageStore(store.path.parent / "messages.yaml")   # customised posts, next to periscope.yaml
+        # what periscope remembers, and when it stays quiet — no-ops until those modules are installed
+        self.history = history_for(self.data_dir / "history.db", int(store.globals.get("history_days") or 90))
+        self.windows = windows_for(store.path.parent / "maintenance.yaml")
         self.specs: dict[str, ServiceSpec] = discover()
         self.presences: dict[str, Presence] = {}
         self.services: dict[str, ServiceBot] = {}
@@ -49,9 +53,34 @@ class Runtime:
         self.webhook: WebhookServer | None = None
         self.started = time.time()
         self._stop = asyncio.Event()
+        self._apply_lock = asyncio.Lock()
         self._tasks: list[asyncio.Task] = []
 
     # ----- assembly --------------------------------------------------------------------------
+    def runnable(self, name: str) -> tuple[ServiceSpec, str, str, dict[str, str]] | str:
+        """(spec, bot name, token, env) when this service could run right now, else why it cannot, in words."""
+        spec = self.specs.get(name)
+        if spec is None:
+            return "this service package is not installed — run periscope update"
+        pname = self.store.presence_for(name)
+        token = self.store.token_for(name)
+        if not token:
+            return f"no bot token yet (bot '{pname}') — add one on the Bots page"
+        env = self.store.env_for(name)
+        missing = spec.required_missing(env)
+        if missing:
+            labels = [(spec.setting(k).label if spec.setting(k) else k) for k in missing]
+            return "needs " + ", ".join(labels) + " — fill them in under Settings"
+        return (spec, pname, token, env)
+
+    def make_service(self, name: str, spec: ServiceSpec, pres: Presence, env: dict[str, str]) -> ServiceBot:
+        with env_scope(env):
+            settings = Settings.from_env()
+        sb = ServiceBot(spec, pres, settings, env, self.state, self.webhook, self.messages, self.history, self.windows)
+        if self.webhook and env.get("WEBHOOK_SECRET"):
+            self.webhook.accept_secret(env["WEBHOOK_SECRET"])
+        return sb
+
     def assemble(self) -> None:
         default_server = self.store.server()
         raw_guild = str(default_server.get("guild_id") or "").strip()
@@ -98,7 +127,7 @@ class Runtime:
                     log.info("[%s] gateway intents beyond default: %s", pname, ", ".join(sorted(intents[pname])))
             with env_scope(env):
                 settings = Settings.from_env()
-            sb = ServiceBot(spec, pres, settings, env, self.state, self.webhook, self.messages)
+            sb = ServiceBot(spec, pres, settings, env, self.state, self.webhook, self.messages, self.history, self.windows)
             if self.webhook and env.get("WEBHOOK_SECRET"):
                 self.webhook.accept_secret(env["WEBHOOK_SECRET"])
             pres.services.append(sb)
@@ -117,6 +146,7 @@ class Runtime:
         for pres in self.presences.values():
             self._tasks.append(asyncio.create_task(self._supervise(pres), name=f"presence:{pres.name}"))
         self._tasks.append(asyncio.create_task(self._heartbeat(), name="heartbeat"))
+        self._tasks.append(asyncio.create_task(self._watch_config(), name="config-watch"))
         web_task = await self._start_web()
         if web_task:
             self._tasks.append(web_task)
@@ -151,6 +181,112 @@ class Runtime:
             await _reset_client(pres)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 300)
+
+    # ----- hot apply -------------------------------------------------------------------------------
+    async def reload_service(self, name: str) -> tuple[bool, str]:
+        """Rebuild one service from what the config says now — no restart, nothing else on the bot disturbed.
+        Returns (ok, what happened) in plain words."""
+        async with self._apply_lock:
+            old = self.services.pop(name, None)
+            if old is not None:
+                try:
+                    await old.unload()
+                except Exception:  # noqa: BLE001
+                    log.exception("[%s] did not unload cleanly", name)
+                if old in old.presence.services:
+                    old.presence.services.remove(old)
+            self.skipped.pop(name, None)
+            if not self.store.service(name).get("enabled"):
+                if old is not None:
+                    log.info("service %s switched off", name)
+                    return True, f"{name} is off"
+                return True, f"{name} is off"
+            ready = self.runnable(name)
+            if isinstance(ready, str):
+                self.skipped[name] = ready
+                return False, ready
+            spec, pname, token, env = ready
+            pres = self.presences.get(pname)
+            if pres is None or pres.token != token:
+                return False, f"bot '{pname}' is not running yet — restart to start it"
+            sb = self.make_service(name, spec, pres, env)
+            pres.services.append(sb)
+            self.services[name] = sb
+            try:
+                await spec.build(sb)
+                sb.built = True
+            except Exception as e:  # noqa: BLE001
+                sb.healthy, sb.last_error = False, f"{type(e).__name__}: {e}"
+                log.exception("[%s] service %s failed to build", pname, name)
+                await sb.unload()
+                return False, f"{name} failed to start: {sb.last_error}"
+            try:
+                pres._synced = False
+                await pres.sync_commands()
+            except Exception:  # noqa: BLE001
+                log.warning("[%s] could not refresh the slash commands after reloading %s", pname, name, exc_info=True)
+            log.info("service %s reloaded — its new settings are live", name)
+            self.write_status()
+            return True, f"{name} is running with the new settings"
+
+    async def apply_config(self) -> list[str]:
+        """Re-read the config and make the running process match it: services switched on or off, settings
+        changed, a service pointed at another bot or server. Returns what changed, in words. A bot whose token
+        changed (or a brand-new bot) still needs a restart — that is said, not done silently."""
+        notes: list[str] = []
+        want = set(self.store.enabled_services())
+        have = set(self.services)
+        for name in sorted(want | have | set(self.skipped)):
+            spec = self.specs.get(name)
+            if spec is None and name not in have:
+                continue
+            live = self.services.get(name)
+            env = self.store.env_for(name) if spec is not None else {}
+            same_bot = live is not None and live.presence.name == self.store.presence_for(name)
+            if live is not None and name in want and live.env == env and same_bot:
+                continue                                   # nothing about this service changed
+            ok, note = await self.reload_service(name)
+            if live is None and name not in want:
+                continue                                   # was already off and still is
+            notes.append(note)
+            if not ok:
+                log.warning("hot apply: %s", note)
+        for pname, p in self.store.presences.items():
+            token = str(p.get("token") or "")
+            pres = self.presences.get(pname)
+            if token and pres is None and any(self.store.presence_for(s) == pname for s in want):
+                notes.append(f"bot '{pname}' is new — restart to connect it")
+            elif pres is not None and token and pres.token != token:
+                notes.append(f"bot '{pname}' has a new token — restart to reconnect it")
+        self.write_status()
+        return notes
+
+    async def _watch_config(self) -> None:
+        """The config file changing (the web UI saving, `periscope config`, an editor) applies itself."""
+        path = self.store.path
+        try:
+            last = path.stat().st_mtime
+        except OSError:
+            last = 0.0
+        while not self._stop.is_set():
+            await asyncio.sleep(1)
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if mtime == last:
+                continue
+            last = mtime
+            await asyncio.sleep(0.3)                        # let a rename-into-place settle
+            try:
+                fresh = Store.load(path)
+            except Exception:  # noqa: BLE001
+                log.error("config could not be read after it changed — keeping what is running", exc_info=True)
+                continue
+            self.store.data = fresh.data
+            notes = await self.apply_config()
+            if notes:
+                log.info("config changed: %s", "; ".join(notes))
 
     async def _start_web(self) -> asyncio.Task | None:
         try:

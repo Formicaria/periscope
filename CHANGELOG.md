@@ -1,8 +1,65 @@
 # Changelog
 
 Every release is a tag (`vX.Y.Z`) whose section here becomes the GitHub release notes. Every package in the
-repo carries the same version — the eight `__init__.py` files and the eight `pyproject.toml` files — and the
-release workflow refuses a tag that disagrees with any of them or has no section here.
+repo carries the same version — every `__init__.py` and every `pyproject.toml` — and the release workflow
+refuses a tag that disagrees with any of them or has no section here.
+
+## v0.2.0
+
+Four things periscope could not do before: change a setting without a restart, remember anything, be told to be
+quiet, or find your services for you. Plus Docker.
+
+**NO MORE RESTARTS.** Saving a setting used to bounce every bot in the process. Now the runtime rebuilds *that one
+service* in place — its cogs come off, its clients close, it is built again from the new settings and its slash
+commands are re-registered — while every other service and every other bot carries on untouched. Switching a
+service on or off, pointing it at another bot or another server, and editing `config/periscope.yaml` by hand all
+work the same way: the process watches that file and applies what changed within a second. `periscope reload`
+hurries it along; `periscope config` and `periscope enable` no longer end with "restart to apply". The header
+banner is gone unless something genuinely needs the process to start again — a new bot token, a brand-new bot —
+and then it says which. A service that fails to rebuild reports why and leaves everything else running.
+
+**PERISCOPE REMEMBERS.** A SQLite event log (`data/history.db`, WAL, pruned on a retention you set) sits behind
+everything: alerts fired, acked and resolved, CI runs, grabs and imports, requests and invites, container state
+changes, plus numeric samples for CPU, memory, disk, queue depth and stream counts. Out of it come a **Trends**
+page — uptime per service, alert counts over 24 h / 7 d / 30 d, sparklines drawn as inline SVG, a filterable
+event table with a CSV download — and a **recap** post that says what happened while you were asleep. Every write
+is crash-proof and off the hot path; the bots run exactly the same when the log is not there.
+
+**ALERTS YOU CAN ANSWER.** Every alert now carries **Ack**, **Snooze** (1 h / 8 h / 24 h) and **Resolve** buttons,
+admin-gated and surviving restarts. Acking records who and when and stops the pings; a repeat of the same alert
+edits the card and counts it instead of posting again; a CRITICAL nobody acked escalates to the alert role once
+after a delay you choose. **Maintenance windows** (`config/maintenance.yaml`, editable on the new **Alerts** page)
+keep periscope quiet on a schedule or for a one-off stretch — the backup window that pegs the CPU every night
+stops paging you, and the card says it would have fired. A broken window file fails open: you get the alert.
+
+**DOCKER.** A new service: containers running / stopped / unhealthy / restarting on the status board with image,
+uptime, CPU and memory; alerts for a non-zero exit, an unhealthy check, a restart loop and an unreachable daemon;
+optional image-update checks; and `/docker ps · restart · start · stop · logs · stats · updates`, the mutating
+ones admin-gated behind Confirm. It talks to the socket, a TCP or TLS endpoint, or through Portainer for people
+who do not expose the socket.
+
+**FIND MY SERVICES.** A **Discover** page (and a step in the first-run flow) scans the network you point it at,
+identifies what answers by its own API rather than by port alone — Sonarr, Radarr, Lidarr, Prowlarr, qBittorrent,
+SABnzbd, Plex, Jellyfin, Overseerr, Prometheus, Alertmanager, Grafana, Proxmox, UniFi, Docker — prefills that
+service's settings, runs its Test and offers to switch it on. Anything the scan cannot reach can come from a
+`docker-compose.yml` or an existing *arr `config.xml` instead. Scans only ever start when an admin asks for one.
+
+Under the hood: `bot.history` and `bot.windows` exist on every service (no-ops when those parts are absent), so a
+send site can call them unconditionally. 598 tests.
+
+## v0.1.3
+
+**THE UPDATE INSTALLS IN ONE GO.** `setup.sh` and `periscope update` installed core and the web UI first and the
+services afterwards, so a version bump made pip judge an inconsistent half of the repo and complain (v0.1.2 went
+through with a warning about the six service packages). Both scripts now hand pip every package in a single
+invocation — the resolver sees the whole set, and a bump cannot leave a box half-installed.
+
+**`periscope list` stopped running the server into the title.** The SERVER column had no gap after a 12-character
+name ("ztechnus.comGitHub").
+
+**THE RELEASE BUILD FAILED ON THE IMAGE NAME.** Docker rejects a capital letter in a repository name, and the
+release workflow built its tags from the owner verbatim (`ghcr.io/Formicaria/…`). Both the image tags and the
+`docker pull` line in the notes now downcase it.
 
 ## v0.1.2
 

@@ -19,6 +19,7 @@
 | [`prometheus`](bots/prometheus) | Prometheus · Alertmanager · Grafana | `/prom` | Alertmanager → Discord with **Silence 1h/24h** buttons, PromQL from chat, target watch, panel screenshots |
 | [`arr`](bots/arr) | Sonarr · Radarr · Lidarr · Prowlarr · qBittorrent/SAB · Plex/Jellyfin | `/arr` | grabs/imports with posters, queue + stall alerts, calendar, now-playing |
 | [`unifi`](bots/unifi) | UniFi | `/unifi` | WAN/devices/clients board, new-client + device-offline alerts, kick/block/restart |
+| [`docker`](bots/docker) | Docker · Portainer | `/docker` | containers up/exited board, restart-loop and unhealthy alerts, image updates, restart/start/stop/logs/stats |
 | [`github`](bots/github) | a GitHub organization | `/gh` | push/PR/issue/release/CI/fork/star feed, per-repo channel routing, CI-failure alerts, polling fallback |
 | [`plexrequests`](bots/plexrequests) | Plex · Overseerr/Jellyseerr or Radarr/Sonarr | `/requests` + `/plexinvite` | **Get Plex Access** invites with role grant, **Search & Request** with availability cards, live status board, new-on-Plex feed, auto-revoke, usage stats |
 
@@ -49,6 +50,22 @@ name (the one embeds carry), colour, status/alert channels and admin roles. Ever
 so the media stack can live in one server while the Plex request buttons sit in another; a bot posts in every server
 its services use, and registers its slash commands there. Everything that is not per-server (log level, board refresh)
 sits in its own card.
+
+**Nothing needs a restart.** Save a setting and that one service is rebuilt in place — its cogs come off, its
+clients close, it starts again from the new settings — while every other service and bot carries on. Editing
+`config/periscope.yaml` by hand does the same: the process watches the file. Only a new bot token asks for a restart.
+
+**Periscope remembers.** An event log behind everything (alerts, CI runs, grabs, requests, container changes,
+plus CPU/memory/disk/queue samples) feeds a **Trends** page — uptime, alert counts, sparklines, a CSV download —
+and a recap post for what happened overnight.
+
+**Alerts you can answer.** Ack, Snooze and Resolve buttons on every alert, repeats folded into one card with a
+count, escalation to a role when a CRITICAL goes unacked, and maintenance windows so the nightly backup stops
+paging you.
+
+**It can find your services.** The Discover page scans the network you point it at, identifies what answers by
+its own API, prefills the settings and runs the Test — or reads them out of a `docker-compose.yml` or an existing
+*arr `config.xml`.
 
 **Every post is editable.** The **Messages** page lists each kind of post — status boards, alerts, the GitHub feed,
 media grabs and imports, the Plex invite and request embeds — with a preview drawn the way Discord draws it. *Simple*

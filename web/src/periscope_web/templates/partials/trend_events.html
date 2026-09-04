@@ -1,0 +1,66 @@
+{# The event table and the filters above it. Swapped in whole by HTMX, so the pick-lists keep their state. #}
+<form method="get" action="/trends" hx-get="/trends/events" hx-target="#trend-events" hx-swap="innerHTML"
+      hx-trigger="change, submit" class="flex flex-wrap items-center gap-2 mb-3">
+  <input name="q" value="{{ picked.search }}" class="input input-bordered input-sm mono w-56"
+         placeholder="search titles, details, keys">
+  <select name="service" class="select select-bordered select-sm">
+    <option value="">every service</option>
+    {% for name in services %}
+    <option value="{{ name }}" {% if name == picked.service %}selected{% endif %}>{{ name or '—' }}</option>
+    {% endfor %}
+  </select>
+  <select name="kind" class="select select-bordered select-sm">
+    <option value="">every kind</option>
+    {% for name in kinds %}
+    <option value="{{ name }}" {% if name == picked.kind %}selected{% endif %}>{{ name or '—' }}</option>
+    {% endfor %}
+  </select>
+  <select name="severity" class="select select-bordered select-sm">
+    <option value="">any severity</option>
+    {% for name in severities %}
+    <option value="{{ name }}" {% if name == picked.severity %}selected{% endif %}>{{ name or '—' }}</option>
+    {% endfor %}
+  </select>
+  <select name="days" class="select select-bordered select-sm" title="how far back to look">
+    {% for label, span in windows %}
+    <option value="{{ span }}" {% if span == picked.days %}selected{% endif %}>last {{ label }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-sm">Filter</button>
+  <a href="{{ csv_href }}" class="btn btn-ghost btn-sm gap-1" download>
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
+    </svg>
+    Download as CSV
+  </a>
+</form>
+
+<div class="overflow-x-auto rounded-box border border-base-300/60">
+  <table class="table table-sm table-pin-rows">
+    <thead>
+      <tr><th>when (UTC)</th><th>service</th><th>kind</th><th>what</th><th class="text-right">severity</th></tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="mono whitespace-nowrap opacity-70">{{ row.when }}</td>
+        <td class="mono">{{ row.service or '—' }}</td>
+        <td class="mono opacity-70">{{ row.kind or '—' }}</td>
+        <td>
+          <div class="truncate max-w-xl">{{ row.title or row.key or '—' }}</div>
+          {% if row.detail %}<div class="text-xs opacity-50 truncate max-w-xl">{{ row.detail }}</div>{% endif %}
+          {% if row.key and row.title %}<div class="text-xs opacity-50 mono">{{ row.key }}</div>{% endif %}
+        </td>
+        <td class="text-right"><span class="badge {{ row.badge }} badge-sm">{{ row.severity }}</span></td>
+      </tr>
+      {% endfor %}
+      {% if not rows %}
+      <tr><td colspan="5" class="text-center opacity-50 py-6">nothing matches — try a longer window</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% if truncated %}
+<p class="text-xs opacity-50 mt-2">Showing the newest {{ rows | length }} — download the CSV for the rest.</p>
+{% endif %}

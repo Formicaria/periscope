@@ -1,0 +1,42 @@
+{# One service: how much of the window it was up, how often it alerted, and the numbers it wrote down. #}
+<div class="card bg-base-100 border border-base-300/60 shadow-sm" id="trend-{{ tile.name }}">
+  <div class="card-body gap-3 p-4">
+    <div class="flex items-center gap-2 flex-wrap">
+      <h3 class="card-title text-base">{{ tile.title }}</h3>
+      <span class="badge {{ tile.badge }} badge-sm" title="share of this window the things below were up">
+        {% if tile.uptime is none %}no up/down record{% else %}{{ "%.2f" | format(tile.uptime) }}% up{% endif %}
+      </span>
+      <span class="ml-auto text-xs opacity-60">{{ tile.events }} event{{ '' if tile.events == 1 else 's' }}</span>
+    </div>
+
+    <div class="flex flex-wrap gap-3 text-xs">
+      {% for a in tile.alerts %}
+      <div class="rounded-box bg-base-200/60 px-3 py-1.5">
+        <div class="opacity-60">alerts · last {{ a.label }}</div>
+        <div class="mono text-base font-semibold {{ 'opacity-50' if not a.n }}">{{ a.n }}</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if tile.rows %}
+    <table class="table table-xs">
+      <thead><tr><th>what</th><th class="text-right">up</th><th class="text-right">changes</th></tr></thead>
+      <tbody>
+        {% for row in tile.rows %}
+        <tr>
+          <td class="mono truncate max-w-[14rem]">{{ row.key }}</td>
+          <td class="text-right"><span class="badge {{ row.badge }} badge-sm mono">{{ "%.2f" | format(row.uptime) }}%</span></td>
+          <td class="text-right opacity-60 mono">{{ row.changes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if tile.charts %}
+    <div class="grid gap-2 sm:grid-cols-2">
+      {% for spark in tile.charts %}{% include "partials/trend_spark.html" %}{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>

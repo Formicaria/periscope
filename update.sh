@@ -6,8 +6,11 @@ DIR="$(pwd)"
 echo "==> git pull"
 git pull --ff-only
 echo "==> deps"
-./venv/bin/pip install --quiet -e core -e web
-for b in bots/*/; do ./venv/bin/pip install --quiet -e "$b"; done
+# one invocation: pip resolves core, the web UI and every service together, so a version bump can never
+# leave the box half-installed on "conflicting dependencies"
+EDITABLES=(-e core -e web)
+for b in bots/*/; do EDITABLES+=(-e "$b"); done
+./venv/bin/pip install --quiet "${EDITABLES[@]}"
 echo "==> refresh CLI + unit"
 sed "s|__DIR__|$DIR|g" periscope.cli > /usr/local/bin/periscope && chmod +x /usr/local/bin/periscope
 for u in $(systemctl list-unit-files --no-legend 'periscope@*' 2>/dev/null | awk '{print $1}'); do

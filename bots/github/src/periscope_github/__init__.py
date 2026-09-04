@@ -3,7 +3,7 @@
 from .config import GithubSettings
 
 __all__ = ["GithubSettings", "COGS", "build_bot"]
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 COGS = ["periscope_github.cogs.events", "periscope_github.cogs.commands", "periscope_github.cogs.poller"]
 

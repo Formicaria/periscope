@@ -103,17 +103,15 @@ def create_app(runtime, *, discord_api: DiscordAPI | None = None, setup_token: s
     st.logs = log_buffer or LogBuffer()
     st.guild = GuildDirectory(runtime, st.discord)
     st.app_ids = {}  # presence name → application id (for invite links)
-    st.changed = False  # a save went through the UI since the runtime started
+    # settings apply themselves (the runtime rebuilds the service in place); these are the few things that
+    # genuinely need the process to start again, collected as plain sentences for the header banner
+    st.pending: list[str] = []
 
     def dirty() -> bool:
-        if st.changed:
-            return True
-        try:
-            return store.path.exists() and store.path.stat().st_mtime > float(getattr(runtime, "started", 0))
-        except OSError:
-            return False
+        return bool(st.pending)
 
     st.dirty = dirty
+    st.pending_reasons = lambda: list(dict.fromkeys(st.pending))
 
     from .routes import register
 

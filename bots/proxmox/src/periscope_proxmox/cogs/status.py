@@ -18,12 +18,15 @@ from periscope import (
     status_dot,
     truncate,
 )
+from periscope.hooks import NullHistory
 
 from ..bot import ProxmoxBot
 from ..client import Snapshot
 from ..config import PveSettings
 
 log = logging.getLogger(__name__)
+# a bot assembled by hand (a test, a bare install) has no event log; recording is never worth a crash
+NO_LOG = NullHistory()
 
 FP_UNREACHABLE = "pve:unreachable"
 CPU_STREAK_POLLS = 3
@@ -84,6 +87,7 @@ def build_board(snap: Snapshot, cfg: PveSettings, *, lab_name: str, cluster: str
 class StatusCog(commands.Cog):
     def __init__(self, bot: ProxmoxBot):
         self.bot = bot
+        self.history = getattr(bot, "history", NO_LOG)   # a no-op when this bot has none
         self.cfg = bot.pve_cfg
         self.board = StatusBoard(bot, key="pve")
         self.view = RefreshView(self.build_embed, custom_id="pve:refresh")
@@ -176,6 +180,8 @@ class StatusCog(commands.Cog):
                 self._cpu_streak.pop(n.name, None)
                 continue
             await self._resolve(fp_down, note="Node back online")
+            self.history.sample(service="pve", metric="cpu", value=n.cpu_pct, key=n.name, server=self.bot.lab_name)
+            self.history.sample(service="pve", metric="mem", value=n.mem_pct, key=n.name, server=self.bot.lab_name)
 
             if n.cpu_pct > cfg.cpu_warn:
                 self._cpu_streak[n.name] = self._cpu_streak.get(n.name, 0) + 1
@@ -202,6 +208,7 @@ class StatusCog(commands.Cog):
             fp = f"pve:storage:{s.key}:full"
             if not s.available:
                 continue
+            self.history.sample(service="pve", metric="disk", value=s.pct, key=s.key, server=self.bot.lab_name)
             if s.pct >= cfg.storage_warn:
                 sev = Severity.CRITICAL if s.pct >= cfg.storage_crit else Severity.WARNING
                 await alerts.fire(Alert(

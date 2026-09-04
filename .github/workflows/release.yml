@@ -90,6 +90,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image
+        # image names must be lowercase; the owner is written Formicaria
+        run: echo "name=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/periscope" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -97,8 +100,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/periscope:${{ needs.verify.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/periscope:latest
+            ${{ steps.image.outputs.name }}:${{ needs.verify.outputs.version }}
+            ${{ steps.image.outputs.name }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -124,7 +127,8 @@ jobs:
             echo ""
             echo "**Install** — \`git clone https://github.com/${{ github.repository }} /opt/periscope && cd /opt/periscope && bash setup.sh\`"
             echo "**Update an existing box** — \`periscope update\`"
-            echo "**Docker** — \`docker pull ghcr.io/${{ github.repository_owner }}/periscope:${VERSION}\`"
+            OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+            echo "**Docker** — \`docker pull ghcr.io/${OWNER}/periscope:${VERSION}\`"
           } >> /tmp/notes.md
       - name: Source archive
         run: |

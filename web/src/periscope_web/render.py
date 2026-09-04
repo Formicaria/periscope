@@ -23,10 +23,13 @@ TEMPLATES = Path(__file__).parent / "templates"
 
 NAV = [
     ("/", "Overview", "grid"),
+    ("/alerts", "Alerts", "bell"),
+    ("/trends", "Trends", "chart"),
     ("/presences", "Bots", "bot"),
     ("/discord", "Discord", "hash"),
     ("/messages", "Messages", "message"),
     ("/routing", "Routing", "route"),
+    ("/discover", "Discover", "search"),
     ("/logs", "Logs", "terminal"),
 ]
 
@@ -96,6 +99,7 @@ def _base_ctx(request: Request) -> dict[str, Any]:
         "default_server": store.server(),      # the one the footer names and the sign-in gate checks
         "noauth": st.noauth,
         "dirty": st.dirty(),
+        "pending": st.pending_reasons() if hasattr(st, "pending_reasons") else [],
         "setup_needed": setup_needed,
         "uptime": human_duration(time.time() - runtime.started),
         "web_port": store.web.get("port"),

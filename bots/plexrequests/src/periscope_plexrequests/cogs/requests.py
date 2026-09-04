@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 import discord
+from periscope.hooks import NullHistory
 from discord import app_commands
 from discord.ext import commands, tasks
 
@@ -41,6 +42,8 @@ from ..config import PlexRequestsSettings
 from ..context import WATCH_MAX_AGE, PlexRequests, slash
 
 log = logging.getLogger(__name__)
+# a bot assembled by hand (a test, a bare install) has no event log; recording is never worth a crash
+NO_LOG = NullHistory()
 
 REQUEST_CUSTOM_ID = "plexrequests:request"
 LEGACY_REQUEST_CUSTOM_ID = "ztplex:request"    # buttons on embeds posted by the standalone bot keep working
@@ -204,6 +207,7 @@ class ResultsView(discord.ui.View):
 class RequestsCog(commands.Cog):
     def __init__(self, bot: Any):
         self.bot = bot
+        self.history = getattr(bot, "history", NO_LOG)   # a no-op when this bot has none
         self.ctx: PlexRequests = bot.plexreq
         self.cfg = self.ctx.cfg
         self._ready_once = False
@@ -313,6 +317,11 @@ class RequestsCog(commands.Cog):
         log.info("request[%s]: discord=%s (%s) %s %s -> %s", pick.get("backend", "seerr"), member, member.id,
                  pick["media_type"], pick["title"], "ok" if ok else msg)
         self.ctx.stats.bump("request_ok" if ok else "request_fail", member)
+        self.history.record(service="plexrequests", kind="request", key=pick["media_type"],
+                            severity="ok" if ok else "warning", server=self.bot.lab_name,
+                            title=f"{'Requested' if ok else 'Could not request'}: {label}",
+                            detail="" if ok else str(msg or ""),
+                            payload={"tmdb_id": pick.get("tmdb_id"), "by": member.display_name})
         if ok:
             announce_channel = self.announce_channel_for(pick["media_type"], member, channel)
             post = self.bot.messages.apply(REQUEST_CARD_KIND, request_card(pick, member.display_name),

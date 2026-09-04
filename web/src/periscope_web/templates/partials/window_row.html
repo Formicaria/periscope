@@ -1,0 +1,158 @@
+{# The quiet times: the global switch, the list of windows, and the form that adds one. Rendered as the whole
+   #windows block when `windows_rows` is passed, or as a single row when `window` is. #}
+{% macro wrow(w) %}
+<tr id="window-{{ w.id }}" class="{% if not w.enabled %}opacity-60{% endif %}">
+  <td>
+    <input type="checkbox" class="toggle toggle-sm" {% if w.enabled %}checked{% endif %}
+           hx-post="/alerts/windows/{{ w.id }}/toggle" hx-target="#windows" hx-swap="outerHTML"
+           aria-label="switch this quiet time on or off">
+  </td>
+  <td>
+    <span class="font-medium">{{ w.reason or w.id }}</span>
+    {% if w.open %}
+    <span class="badge badge-warning badge-xs ml-1" title="open right now">quiet now</span>
+    {% endif %}
+    {% if w.problem %}
+    <span class="badge badge-error badge-xs ml-1" title="{{ w.problem }}">not usable</span>
+    {% endif %}
+    <div class="text-xs opacity-50 mono">{{ w.id }}</div>
+  </td>
+  <td class="text-sm">{{ w.when }}</td>
+  <td class="text-sm opacity-80">{{ w.scope }}</td>
+  <td class="text-right">
+    <button type="button" class="btn btn-ghost btn-xs" title="remove this quiet time"
+            hx-post="/alerts/windows/{{ w.id }}/delete" hx-target="#windows" hx-swap="outerHTML"
+            hx-confirm="Remove the quiet time “{{ w.reason or w.id }}”?">Remove</button>
+  </td>
+</tr>
+{% endmacro %}
+
+{% if windows_rows is defined %}
+<div id="windows" class="grid gap-4">
+  {% if problems %}
+  <div class="alert alert-warning text-sm">
+    <div>
+      <p class="font-medium">The quiet-times file has a problem, so nothing is being kept quiet:</p>
+      <ul class="list-disc ml-5">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card bg-base-200 shadow-sm">
+    <form class="card-body p-4 gap-3" hx-post="/alerts/quiet" hx-target="#windows" hx-swap="outerHTML">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <h3 class="text-xs uppercase tracking-widest opacity-60">Quiet everything</h3>
+      <p class="text-xs opacity-70">For a job that touches the whole rack. Nothing is posted at all until the
+        time you give here — the alerts are still logged, so you can see afterwards what happened.</p>
+      {% if quiet.on %}
+      <p class="text-sm"><span class="badge badge-warning badge-sm">quiet now</span>
+        until {{ quiet.until }}{% if quiet.ends %} ({{ quiet.ends }}){% endif %} — {{ quiet.reason }}</p>
+      {% endif %}
+      <div class="flex flex-wrap gap-2">
+        <input type="datetime-local" name="until" value="{{ quiet.until }}" aria-label="quiet until"
+               class="input input-bordered input-sm">
+        <input name="reason" value="{{ quiet.reason }}" class="input input-bordered input-sm flex-1 min-w-48"
+               placeholder="why (shown in the log)" aria-label="why everything is quiet">
+        <button class="btn btn-sm btn-warning">{{ 'Update' if quiet.on else 'Go quiet' }}</button>
+        {% if quiet.on %}
+        <button type="button" class="btn btn-sm" title="switch the quiet period off again"
+                hx-post="/alerts/quiet" hx-vals='{"until": "", "reason": ""}'>Turn alerts back on</button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4 gap-3">
+      <h3 class="text-xs uppercase tracking-widest opacity-60">Quiet times</h3>
+      <div class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead><tr><th>On</th><th>Why</th><th>When</th><th>Covers</th><th></th></tr></thead>
+          <tbody>
+            {% for w in windows_rows %}{{ wrow(w) }}{% endfor %}
+            {% if not windows_rows %}
+            <tr><td colspan="5" class="text-sm opacity-60">
+              No quiet times yet — every alert goes out at any hour.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <p class="text-xs opacity-50">Kept in {{ file }}, re-read whenever it changes — no restart needed.</p>
+    </div>
+  </div>
+
+  <div class="card bg-base-200 shadow-sm">
+    <form class="card-body p-4 gap-3" hx-post="/alerts/windows" hx-target="#windows" hx-swap="outerHTML">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <h3 class="text-xs uppercase tracking-widest opacity-60">Add a quiet time</h3>
+      <input name="reason" class="input input-bordered input-sm" required maxlength="120"
+             placeholder="why it is quiet — e.g. Nightly backups, the disks are meant to be busy"
+             aria-label="why it is quiet">
+      <div class="flex flex-wrap gap-4 items-start">
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="radio" name="kind" value="repeat" class="radio radio-sm" checked> Every week
+        </label>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="radio" name="kind" value="once" class="radio radio-sm"> Just once
+        </label>
+      </div>
+      <div class="flex flex-wrap gap-4 items-end">
+        <div>
+          <div class="text-xs opacity-60 mb-1">Days (every week)</div>
+          <div class="flex flex-wrap gap-1">
+            {% for value, label in days %}
+            <label class="flex items-center gap-1 text-xs cursor-pointer badge badge-ghost badge-lg">
+              <input type="checkbox" name="days" value="{{ value }}" class="checkbox checkbox-xs"> {{ label }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <label class="text-xs opacity-60">From
+          <input type="time" name="start" value="01:00" class="input input-bordered input-sm block mt-1"
+                 aria-label="start time"></label>
+        <label class="text-xs opacity-60">To
+          <input type="time" name="end" value="04:30" class="input input-bordered input-sm block mt-1"
+                 aria-label="end time"></label>
+      </div>
+      <div class="flex flex-wrap gap-4 items-end">
+        <label class="text-xs opacity-60">Starts (just once)
+          <input type="datetime-local" name="start_at" class="input input-bordered input-sm block mt-1"
+                 aria-label="one-off start"></label>
+        <label class="text-xs opacity-60">Ends (just once)
+          <input type="datetime-local" name="end_at" class="input input-bordered input-sm block mt-1"
+                 aria-label="one-off end"></label>
+      </div>
+      <div class="flex flex-wrap gap-4 items-start">
+        <div>
+          <div class="text-xs opacity-60 mb-1">Servers (none ticked: all of them)</div>
+          <div class="flex flex-wrap gap-1">
+            {% for s in servers %}
+            <label class="flex items-center gap-1 text-xs cursor-pointer badge badge-ghost badge-lg">
+              <input type="checkbox" name="servers" value="{{ s }}" class="checkbox checkbox-xs"> {{ s }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60 mb-1">Services (none ticked: all of them)</div>
+          <div class="flex flex-wrap gap-1">
+            {% for s in services %}
+            <label class="flex items-center gap-1 text-xs cursor-pointer badge badge-ghost badge-lg">
+              <input type="checkbox" name="services" value="{{ s }}" class="checkbox checkbox-xs"> {{ s }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <input name="keys" class="input input-bordered input-sm mono" maxlength="200"
+             placeholder="only these alerts (optional) — e.g. docker:container:*, pve:node:*:cpu"
+             aria-label="only these alert fingerprints">
+      <div><button class="btn btn-primary btn-sm">Add quiet time</button></div>
+      <p class="text-xs opacity-60">An end time earlier than the start runs past midnight. A one-off window
+        expires by itself and can then be removed.</p>
+    </form>
+  </div>
+</div>
+{% else %}
+{{ wrow(window) }}
+{% endif %}

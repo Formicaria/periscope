@@ -80,6 +80,34 @@
     </div>
   </div>
 
+  {# ---- optional: find what is already running here ---- #}
+  <div class="card bg-base-200 shadow-sm {% if not steps.guild %}opacity-50{% endif %}">
+    <div class="card-body p-4 gap-3">
+      <div class="flex items-center gap-2">
+        <span class="badge badge-ghost badge-sm">✦</span><h3 class="font-semibold">Find what you already run</h3>
+        <span class="badge badge-ghost badge-xs">optional</span>
+        {% if discovery and discovery.found %}<span class="text-xs opacity-60 ml-auto">{{ discovery.found }} found</span>{% endif %}
+      </div>
+      <p class="text-xs opacity-70">
+        Saves typing: periscope can knock on the addresses on your network, work out which of them are Sonarr,
+        Plex, Proxmox and so on, and fill their settings in. It only looks when you ask it to, and it reads the
+        public version endpoint each product offers without signing in. Skip this and fill the settings in by hand
+        if you would rather.
+      </p>
+      {% if steps.guild %}
+      <div class="flex flex-wrap items-center gap-2">
+        <a href="/discover" class="btn btn-sm {{ 'btn-ghost border-base-300' if discovery and discovery.ran else 'btn-primary' }}">
+          {% if discovery and discovery.running %}Scan running — open it
+          {% elif discovery and discovery.ran %}Open it again
+          {% else %}Find my services{% endif %}</a>
+        <span class="text-xs opacity-60">
+          {% if discovery and discovery.hosts %}will suggest <span class="mono">{{ discovery.hosts }}</span>{% endif %}
+        </span>
+      </div>
+      {% else %}<p class="text-xs opacity-60">pick a server first</p>{% endif %}
+    </div>
+  </div>
+
   {# ---- 4 services ---- #}
   <div class="card bg-base-200 shadow-sm {% if not steps.guild %}opacity-50{% endif %}">
     <div class="card-body p-4 gap-3">

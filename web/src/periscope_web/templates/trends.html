@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Trends{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-center gap-2 mb-4">
+  <p class="text-sm opacity-70">
+    What periscope has written down since <span class="mono">{{ since_text }}</span> UTC.
+  </p>
+  <div class="join ml-auto">
+    {% for label, span in windows %}
+    <a href="/trends?days={{ span }}"
+       class="join-item btn btn-sm {{ 'btn-active' if span == days else 'btn-ghost' }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+{% if not enabled %}
+<div class="alert alert-info mb-4">
+  <span>Nothing is being recorded yet. The event log starts filling up as soon as the bots are running —
+    come back after they have been up for a while.</span>
+</div>
+{% elif not total %}
+<div class="alert alert-info mb-4">
+  <span>Nothing happened in this window. Try a longer one, or come back once the bots have posted something.</span>
+</div>
+{% endif %}
+
+{% if tiles %}
+<div class="grid gap-4 lg:grid-cols-2 mb-8">
+  {% for tile in tiles %}{% include "partials/trend_service.html" %}{% endfor %}
+</div>
+{% endif %}
+
+<h2 class="text-base font-semibold mb-2">Everything that happened</h2>
+<div id="trend-events">
+  {% include "partials/trend_events.html" %}
+</div>
+{% endblock %}

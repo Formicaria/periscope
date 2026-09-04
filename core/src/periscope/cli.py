@@ -48,7 +48,7 @@ def cmd_list(store: Store, root: Path, args: list[str]) -> int:
     else:
         _say("  runtime not running (periscope start)")
     multi = len(store.servers) > 1
-    _say("    " + "STATE".ljust(13) + "SERVICE".ljust(15) + "BOT".ljust(11) + ("SERVER".ljust(12) if multi else "") + "TITLE")
+    _say("    " + "STATE".ljust(13) + "SERVICE".ljust(15) + "BOT".ljust(11) + ("SERVER".ljust(14) if multi else "") + "TITLE")
     names = sorted(set(specs) | set(store.services), key=lambda n: (specs[n].group if n in specs else "zzz", n))
     problems: list[str] = []
     for name in names:
@@ -62,7 +62,7 @@ def cmd_list(store: Store, root: Path, args: list[str]) -> int:
         title = specs[name].title if name in specs else name + " (not installed)"
         bot = store.presence_for(name) if cfg.get("enabled") else "-"
         where = ((store.servers[store.server_for(name)].get("name") or store.server_for(name)) if cfg.get("enabled") else "-") if multi else ""
-        col = (truncate(where, 12) if multi else "").ljust(12 if multi else 0)
+        col = (truncate(where, 13) if multi else "").ljust(14 if multi else 0)
         _say(f"  {icon} {state:<13}{name:<15}{bot:<11}{col}{title}")
         if cfg.get("enabled") and live.get("error") and state != "starting":
             where = FIX_PAGE.get(live.get("fix") or "", "")
@@ -109,7 +109,7 @@ def cmd_enable(store: Store, root: Path, args: list[str], on: bool = True) -> in
         store.set_enabled(name, on)
         _say(f"  {name} {'enabled' if on else 'disabled'}")
     store.save()
-    _say("  restart to apply: periscope restart")
+    _say("  the running process picks this up within a second (periscope reload to hurry it along)")
     return rc
 
 
@@ -140,7 +140,7 @@ def cmd_config(store: Store, root: Path, args: list[str]) -> int:
     if updates:
         store.update_service_env(name, updates)
         store.save()
-        _say(f"  saved {', '.join(updates)} — restart to apply")
+        _say(f"  saved {', '.join(updates)} — the running process picks it up within a second")
     cfg = store.service(name)
     _say(f"  {name}: enabled={cfg.get('enabled')} presence={cfg.get('presence')}")
     env = store.env_for(name)
@@ -232,6 +232,18 @@ def cmd_web(store: Store, root: Path, args: list[str]) -> int:
     return 0
 
 
+def cmd_reload(store: Store, root: Path, args: list[str]) -> int:
+    """Ask the running process to re-read the config now. Settings changes apply by themselves within a second
+    or two; this is for when you want it immediately (or want to see that it happened)."""
+    rt = _runtime_status(root)
+    if not rt or rt.get("stale"):
+        _say("  runtime not running — periscope start")
+        return 1
+    store.save()          # the runtime watches this file; writing it is the signal
+    _say("  asked periscope to apply the config — watch it land: periscope logs")
+    return 0
+
+
 def cmd_init(store: Store, root: Path, args: list[str]) -> int:
     """Terminal first-run: token → presence default, pick guild, then point at the web UI."""
     _say("\nperiscope · first run. The web UI does the same with clicks (periscope web); this is the terminal path.")
@@ -274,7 +286,8 @@ def cmd_init(store: Store, root: Path, args: list[str]) -> int:
 
 
 VERBS = {"list": cmd_list, "status": cmd_status, "enable": cmd_enable, "disable": lambda s, r, a: cmd_enable(s, r, a, on=False),
-         "check": cmd_check, "config": cmd_config, "presence": cmd_presence, "bots": cmd_presence, "web": cmd_web, "init": cmd_init}
+         "check": cmd_check, "config": cmd_config, "presence": cmd_presence, "bots": cmd_presence, "web": cmd_web,
+         "reload": cmd_reload, "init": cmd_init}
 
 
 def main(argv: list[str] | None = None) -> int:

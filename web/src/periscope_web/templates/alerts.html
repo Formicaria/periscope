@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<p class="text-sm opacity-70 mb-4 max-w-3xl">
+  Everything the running services are worried about right now, and the times you would rather not hear from
+  them. Ack stops the pings and records who is on it, Snooze holds them for a while, Resolve closes the alert —
+  all three do exactly what the buttons on the Discord card do, and the card is updated at the same moment.
+</p>
+
+<section class="mb-8">
+  <h2 class="text-sm uppercase tracking-widest opacity-60 mb-3">Firing now</h2>
+  {% include "partials/alert_card.html" %}
+</section>
+
+<section>
+  <h2 class="text-sm uppercase tracking-widest opacity-60 mb-3">Quiet times</h2>
+  <p class="text-sm opacity-70 mb-3 max-w-3xl">
+    While a quiet time is open nothing is posted at all — no card, no ping. It is still written to the log, so
+    you can see afterwards what would have gone out, and an alert that fires during one says so on its card
+    once the quiet time ends.
+  </p>
+  {% include "partials/window_row.html" %}
+</section>
+{% endblock %}

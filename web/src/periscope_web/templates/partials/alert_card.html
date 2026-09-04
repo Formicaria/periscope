@@ -1,0 +1,63 @@
+{# One open alert, with the same three actions the card in Discord carries. Rendered as the whole #firing
+   list when `rows` is passed, or as a single card when `alert` is. #}
+{% macro card(a, snooze_choices) %}
+<div id="alert-{{ a.owner }}-{{ a.fingerprint | replace(':', '-') | replace('/', '-') }}"
+     class="card bg-base-200 shadow-sm">
+  <div class="card-body p-4 gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="badge {{ a.severity_badge }} badge-sm">{{ a.severity }}</span>
+      <span class="font-medium">{{ a.title }}</span>
+      <span class="badge badge-outline badge-xs" title="the service that raised it">{{ a.service }}</span>
+      <span class="badge {{ a.state_badge }} badge-sm ml-auto">{{ a.state }}</span>
+    </div>
+    <p class="text-xs opacity-60 mono break-all">
+      {{ a.fingerprint }}{% if a.age %} · open for {{ a.age }}{% endif %}
+      {%- if a.count > 1 %} · seen {{ a.count }} times{% endif %}
+    </p>
+    <ul class="text-sm opacity-80 leading-relaxed">
+      {% for line in a.lines %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    <form class="flex flex-wrap items-center gap-2 pt-1" hx-target="#firing" hx-swap="outerHTML">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="service" value="{{ a.owner }}">
+      <input type="hidden" name="fingerprint" value="{{ a.fingerprint }}">
+      <button type="button" class="btn btn-sm btn-primary" hx-post="/alerts/ack" hx-include="closest form"
+              {% if a.acked_by %}disabled title="already acked"
+              {% else %}title="stop the pings and say who is on it"{% endif %}>
+        Ack
+      </button>
+      <select name="hours" class="select select-bordered select-sm" aria-label="how long to snooze">
+        {% for h in snooze_choices %}<option value="{{ h }}">Snooze {{ h }}h</option>{% endfor %}
+      </select>
+      <button type="button" class="btn btn-sm" hx-post="/alerts/snooze" hx-include="closest form"
+              title="hold the pings for a while; it speaks up again after that">Snooze</button>
+      <button type="button" class="btn btn-sm btn-success" hx-post="/alerts/resolve" hx-include="closest form"
+              title="close it by hand — the card in Discord goes green">Resolve</button>
+      {% if a.acked_by %}<span class="text-xs opacity-60">acked by {{ a.acked_by }}</span>{% endif %}
+      {% if a.snoozed_words %}<span class="text-xs opacity-60">quiet until {{ a.snoozed_words }}</span>{% endif %}
+    </form>
+  </div>
+</div>
+{% endmacro %}
+
+{% if rows is defined %}
+<div id="firing" class="grid gap-3">
+  {% for a in rows %}{{ card(a, snooze_choices) }}{% endfor %}
+  {% if not rows %}
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4">
+      <p class="text-sm opacity-70">
+        {% if live %}
+        Nothing is firing. Anything a service raises shows up here within a few seconds.
+        {% else %}
+        No services are running yet, so there is nothing to show. Switch one on from the Overview page, then
+        restart — quiet times below can be set up now either way.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% else %}
+{{ card(alert, snooze_choices) }}
+{% endif %}

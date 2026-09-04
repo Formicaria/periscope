@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from periscope_web.discordapi import INVITE_PERMS
 
 HX = {"HX-Request": "true"}
@@ -261,3 +263,37 @@ async def test_no_secret_leaks_anywhere(client):
         r = await client.get(path)
         assert r.status_code == 200, path
         assert "good-token-abc" not in r.text and "s3cret" not in r.text and "csecret" not in r.text, path
+
+
+# ----- hot apply ------------------------------------------------------------------------------------------
+async def test_saving_settings_applies_them_without_asking_for_a_restart(client, app, runtime):
+    """A settings save reaches the running process: the runtime is asked to apply it, and the header stays quiet."""
+    applied = []
+
+    async def apply_config():
+        applied.append(True)
+        return ["pve is running with the new settings"]
+
+    runtime.apply_config = apply_config
+    form = {"_enabled": "true", "_presence": "default", "PVE_URL": "https://pve2:8006", "PVE_TOKEN_SECRET": "",
+            "PVE_CPU_WARN": "90", "PVE_MODE": "auto", "MEDIA_CHANNEL_ID": "", "PVE_ROLE_ID": "", "PVE_TAGS": "",
+            "STATUS_CHANNEL_ID": "", "ALERT_CHANNEL_ID": "", "ALERT_ROLE_ID": "", "STATUS_INTERVAL_S": ""}
+    r = await client.post("/services/pve", data=form, headers=HX)
+    assert r.status_code == 200
+    await asyncio.sleep(0.05)                                  # the apply runs as a task beside the response
+    assert applied and app.state.pending == [] and app.state.dirty() is False
+    r = await client.get("/")
+    assert "Restart now" not in r.text
+
+
+async def test_only_what_needs_a_restart_asks_for_one(client, app, runtime):
+    """A new bot token cannot be hot-applied: that, and only that, raises the banner — with the reason on it."""
+    async def apply_config():
+        return ["bot 'arr' has a new token — restart to reconnect it"]
+
+    runtime.apply_config = apply_config
+    await client.post("/services/pve/disable", headers=HX)
+    await asyncio.sleep(0.05)
+    assert app.state.dirty() is True
+    r = await client.get("/")
+    assert "new token" in r.text and "Restart now" in r.text
