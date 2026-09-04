@@ -1,0 +1,21 @@
+<section id="bots-{{ group.slug }}" class="space-y-2">
+  <div class="flex flex-wrap items-baseline gap-2">
+    {% if group.unused %}
+    <h2 class="text-xs uppercase tracking-widest opacity-60">Not in use</h2>
+    <span class="text-xs opacity-60">— pick this bot on a service's settings page</span>
+    {% else %}
+    <h2 class="text-xs uppercase tracking-widest opacity-60">
+      <a href="/discord" class="link link-hover" title="this Discord server's settings">{{ group.label }}</a>
+    </h2>
+    <span class="mono text-[10px] opacity-40">{{ group.guild_id or 'no server id yet' }}</span>
+    {% if group.is_default %}<span class="badge badge-primary badge-xs" title="new services post here">default</span>{% endif %}
+    {% endif %}
+  </div>
+  {% if group.rows %}
+  {% include "partials/presence_table.html" %}
+  {% else %}
+  <div class="rounded-box bg-base-200 shadow-sm p-4 text-xs opacity-60">
+    No bot posts in this server yet — a service picks the bot it posts as under "posts as" on its settings page.
+  </div>
+  {% endif %}
+</section>

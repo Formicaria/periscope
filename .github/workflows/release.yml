@@ -1,0 +1,132 @@
+name: Release
+
+# Publishes a tagged release: the test suite, a versioned Docker image on GHCR, a source archive, and a
+# GitHub Release whose notes are this version's CHANGELOG.md section.
+#
+# Tag a commit whose __version__ already matches:
+#   git tag v0.1.1
+#   git push origin v0.1.1
+#
+# Or run it from the Actions tab (workflow_dispatch) against an existing tag.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.1.1)"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  verify:
+    name: Verify the tag matches __version__
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      ref: ${{ steps.check.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - id: check
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG_VERSION="${TAG#v}"
+          CODE_VERSION=$(grep -oP '(?<=^__version__ = ")[^"]+' core/src/periscope/__init__.py)
+          WEB_VERSION=$(grep -oP '(?<=^__version__ = ")[^"]+' web/src/periscope_web/__init__.py)
+          echo "tag $TAG_VERSION · core $CODE_VERSION · web $WEB_VERSION"
+          if [ "$TAG_VERSION" != "$CODE_VERSION" ] || [ "$TAG_VERSION" != "$WEB_VERSION" ]; then
+            echo "::error::$TAG does not match __version__ (core $CODE_VERSION, web $WEB_VERSION). Bump, commit, re-tag."
+            exit 1
+          fi
+          if ! grep -q "^## v${TAG_VERSION}\$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## v${TAG_VERSION}' section — write the release notes first."
+            exit 1
+          fi
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "ref=${{ inputs.tag || github.ref }}" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Tests
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.verify.outputs.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e core -e web pytest pytest-asyncio
+      - run: for b in bots/*/; do pip install -e "$b"; done
+      - run: pytest -q
+
+  docker:
+    name: Docker image (GHCR)
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.verify.outputs.ref }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/periscope:${{ needs.verify.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/periscope:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish:
+    name: Publish the GitHub Release
+    needs: [verify, test, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.verify.outputs.ref }}
+      - name: This version's CHANGELOG section
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          awk -v hdr="## v${VERSION}" '
+            $0 ~ /^## v/ && found { exit }
+            index($0, hdr) == 1 { found=1 }
+            found { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "**Install** — \`git clone https://github.com/${{ github.repository }} /opt/periscope && cd /opt/periscope && bash setup.sh\`"
+            echo "**Update an existing box** — \`periscope update\`"
+            echo "**Docker** — \`docker pull ghcr.io/${{ github.repository_owner }}/periscope:${VERSION}\`"
+          } >> /tmp/notes.md
+      - name: Source archive
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          git archive --format=tar.gz --prefix="periscope-${VERSION}/" -o "periscope-${VERSION}.tar.gz" HEAD
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.verify.outputs.ref }}
+          name: PERISCOPE v${{ needs.verify.outputs.version }}
+          body_path: /tmp/notes.md
+          files: periscope-*.tar.gz
+          draft: false
+          make_latest: true

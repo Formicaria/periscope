@@ -1,5 +1,9 @@
 """/presences ("Bots" in the UI): the Discord identities services post as — tokens (validated against Discord,
-never rendered back), labels, invite links, which services use which bot, and why one is offline."""
+never rendered back), labels, invite links, which services use which bot, and why one is offline.
+
+The page is laid out one section per Discord server: a bot belongs to a server when a service that posts in that
+server posts as it, so a bot that serves two servers is listed in both. Bots no service uses yet get a last
+section of their own, so a freshly added one is still visible."""
 
 from __future__ import annotations
 
@@ -11,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..discordapi import DiscordError, invite_url
 from ..render import flash, is_htmx, partial, redirect, render, toasts
 from . import save
+from .servers import server_label
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,18 +47,67 @@ def _rows(request: Request) -> list[dict]:
                      "services": users, "enabled": [s for s in users if store.services[s].get("enabled")],
                      "connected": bool(live.get("connected")), "user": live.get("user"), "live": bool(live),
                      "error": live.get("error"), "missing_guilds": live.get("missing_guilds") or {},
-                     "app_id": st.app_ids.get(name) or live.get("app_id"),
+                     "app_id": st.app_ids.get(name) or live.get("app_id"), "invite": live.get("invite") or "",
                      "removable": fallback is not None, "fallback": fallback})
     return rows
 
 
-def _row(request: Request, name: str) -> dict:
-    return next(r for r in _rows(request) if r["name"] == name)
+def _in_server(row: dict, guild_id: str) -> bool | None:
+    """Is this bot in that Discord server? False when the running bot names that server id as one it is missing,
+    True when it is running and does not, None while nothing is known — no token, not started, or no id set."""
+    if not guild_id:
+        return None
+    if guild_id in row["missing_guilds"]:
+        return False
+    return True if row["connected"] else None
+
+
+def _scoped(store, row: dict, slug: str, guild_id: str, here: list[str], elsewhere: list[str]) -> dict:
+    """One bot's row inside one section: only the services that post in that section's server, whether the bot is
+    in that Discord server, and the other servers it posts in. `slug` keeps the row ids apart across sections."""
+    return {**row, "id": f"{slug}-{row['name']}", "services": here, "also_in": elsewhere,
+            "enabled": [s for s in here if store.services[s].get("enabled")],
+            "in_server": _in_server(row, guild_id), "needed_by": row["missing_guilds"].get(guild_id, "")}
+
+
+async def _groups(request: Request) -> list[dict]:
+    """The page in sections: one per configured server (the default first) with the bots that post in it, then
+    one for the bots no service uses yet."""
+    st = request.app.state
+    store = st.runtime.store
+    names = await st.guild.names()
+    labels = {key: server_label(key, srv, names) for key, srv in store.servers.items()}
+    where = {name: store.server_for(name) for name in store.services}
+    rows = _rows(request)
+    default = store.default_server()
+    groups, used = [], set()
+    for key in [default, *(k for k in store.servers if k != default)]:
+        guild_id = str(store.servers[key].get("guild_id") or "").strip()
+        here = []
+        for row in rows:
+            mine = [s for s in row["services"] if where[s] == key]
+            if not mine:
+                continue
+            used.add(row["name"])
+            others = [labels[k] for k in dict.fromkeys(where[s] for s in row["services"]) if k != key]
+            here.append(_scoped(store, row, key, guild_id, mine, others))
+        groups.append({"slug": key, "label": labels[key], "guild_id": guild_id, "rows": here,
+                       "is_default": key == default})
+    spare = [_scoped(store, row, "unused", "", [], []) for row in rows if row["name"] not in used]
+    if spare:
+        groups.append({"slug": "unused", "unused": True, "rows": spare})
+    return groups
+
+
+async def _list(request: Request):
+    """What every mutating endpoint answers with: the whole grouped list. One bot can sit in several sections
+    now, so swapping a single row would leave its other rows showing the old values."""
+    return partial(request, "partials/presence_groups.html", {"groups": await _groups(request)})
 
 
 @router.get("/presences")
 async def presences_page(request: Request):
-    return render(request, "presences.html", {"rows": _rows(request)})
+    return render(request, "presences.html", {"groups": await _groups(request)})
 
 
 @router.post("/presences")
@@ -72,7 +126,7 @@ async def presence_add(request: Request):
     save(request)
     flash(request, f"bot {name} added — now paste its token in the row", "success")
     if is_htmx(request):
-        return partial(request, "partials/presence_table.html", {"rows": _rows(request)})
+        return await _list(request)
     return redirect(request, "/presences")
 
 
@@ -99,7 +153,7 @@ async def presence_token(request: Request, name: str):
     save(request)
     flash(request, f"token works — this is {me.get('username')} (app id {me.get('id')}); invite it to your server if you have not yet, then restart to apply", "success")
     if is_htmx(request):
-        return partial(request, "partials/presence_row.html", {"row": _row(request, name)})
+        return await _list(request)
     return redirect(request, "/presences")
 
 
@@ -126,7 +180,7 @@ async def presence_label(request: Request, name: str):
     save(request)
     flash(request, "bot updated — restart to apply", "success")
     if is_htmx(request):
-        return partial(request, "partials/presence_table.html", {"rows": _rows(request)})
+        return await _list(request)
     return redirect(request, "/presences")
 
 
@@ -147,7 +201,7 @@ async def presence_delete(request: Request, name: str):
     save(request)
     flash(request, f"bot {name} removed" + (f" — {', '.join(moved)} now post as {fallback}" if moved else ""), "info")
     if is_htmx(request):
-        return partial(request, "partials/presence_table.html", {"rows": _rows(request)})
+        return await _list(request)
     return redirect(request, "/presences")
 
 

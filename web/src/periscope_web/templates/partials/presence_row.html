@@ -1,10 +1,13 @@
-<tr id="presence-{{ row.name }}" class="align-top">
+<tr id="presence-{{ row.id }}" class="align-top">
   <td>
     <div class="font-medium">{{ row.label }}</div>
     <div class="mono text-xs opacity-50">{{ row.name }}</div>
+    {% if row.also_in %}
+    <div class="text-xs opacity-60 mt-1" title="the same bot posts in these servers too">also posts in {{ row.also_in | join(', ') }}</div>
+    {% endif %}
     <details class="mt-1">
       <summary class="text-xs opacity-60 cursor-pointer select-none">rename</summary>
-      <form class="flex flex-wrap gap-1 mt-1" hx-post="/presences/{{ row.name }}/label" hx-target="#presence-table" hx-swap="outerHTML">
+      <form class="flex flex-wrap gap-1 mt-1" hx-post="/presences/{{ row.name }}/label" hx-target="#bots" hx-swap="outerHTML">
         <input name="label" value="{{ row.label }}" class="input input-bordered input-xs w-32" placeholder="label" aria-label="label">
         <input name="new_name" value="{{ row.name }}" class="input input-bordered input-xs w-24 mono" pattern="[a-z0-9][a-z0-9_-]{0,31}" aria-label="short name">
         <button class="btn btn-ghost btn-xs">save</button>
@@ -13,7 +16,7 @@
   </td>
   <td>
     <div class="text-xs">{% if row.has_token %}<span class="badge badge-success badge-sm">set</span>{% else %}<span class="badge badge-warning badge-sm">missing</span>{% endif %}</div>
-    <form class="flex gap-1 mt-1" hx-post="/presences/{{ row.name }}/token" hx-target="#presence-{{ row.name }}" hx-swap="outerHTML" autocomplete="off">
+    <form class="flex gap-1 mt-1" hx-post="/presences/{{ row.name }}/token" hx-target="#bots" hx-swap="outerHTML" autocomplete="off">
       <input type="password" name="token" class="input input-bordered input-xs w-44 mono" placeholder="{{ 'paste a new token' if row.has_token else 'paste the bot token' }}" autocomplete="new-password" aria-label="bot token">
       <button class="btn btn-ghost btn-xs">{{ 'replace' if row.has_token else 'set' }}</button>
     </form>
@@ -23,19 +26,25 @@
   </td>
   <td class="text-xs max-w-xs">
     {% if row.connected %}<span class="badge badge-success badge-sm">online</span> {{ row.user }}
-      {% for gid, who in row.missing_guilds.items() %}<div class="text-error mt-1">not in server {{ gid }} (needed by {{ who }}) — use the invite link</div>{% endfor %}
     {% elif row.error %}<span class="badge badge-error badge-sm">offline</span><div class="text-error mt-1 break-words">{{ row.error }}</div>
     {% elif row.live %}<span class="badge badge-warning badge-sm">starting</span>
     {% elif row.has_token and row.enabled %}<span class="opacity-60">not running yet — restart to start it</span>
     {% elif row.has_token %}<span class="opacity-60">idle — no service switched on</span>
     {% else %}<span class="opacity-60">needs a token</span>{% endif %}
+    {% if row.in_server is none %}
+    {% elif row.in_server %}
+    <div class="opacity-60 mt-1">in this server</div>
+    {% else %}
+    <div class="text-error mt-1">not in this server{% if row.needed_by %} ({{ row.needed_by }} needs it){% endif %} —
+      {% if row.invite %}<a href="{{ row.invite }}" target="_blank" rel="noopener" class="link link-primary">invite it</a>{% else %}use the invite link{% endif %}</div>
+    {% endif %}
   </td>
-  <td class="text-xs" id="invite-{{ row.name }}" {% if row.has_token %}hx-get="/presences/{{ row.name }}/invite" hx-trigger="load" hx-swap="innerHTML"{% endif %}>
+  <td class="text-xs" id="invite-{{ row.id }}" {% if row.has_token %}hx-get="/presences/{{ row.name }}/invite" hx-trigger="load" hx-swap="innerHTML"{% endif %}>
     {% if row.has_token %}<span class="loading loading-dots loading-xs"></span>{% else %}<span class="opacity-50">set a token first</span>{% endif %}
   </td>
   <td class="text-right">
     {% if row.removable %}
-    <button class="btn btn-ghost btn-xs text-error" hx-post="/presences/{{ row.name }}/delete" hx-target="#presence-table" hx-swap="outerHTML"
+    <button class="btn btn-ghost btn-xs text-error" hx-post="/presences/{{ row.name }}/delete" hx-target="#bots" hx-swap="outerHTML"
             hx-confirm="Remove bot {{ row.label }}? Its token is forgotten; services move to {{ row.fallback }}.">remove</button>
     {% endif %}
   </td>

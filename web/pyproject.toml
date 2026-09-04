@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "periscope-web"
-version = "2.1.0"
+version = "0.1.1"
 description = "periscope web UI: admin pages + API served inside the periscope runtime (FastAPI + HTMX)."
 readme = "README.md"
 license = { text = "MIT" }

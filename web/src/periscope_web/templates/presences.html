@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Bots{% endblock %}
 {% block content %}
-<p class="text-sm opacity-70 mb-4 max-w-3xl">A bot is a Discord application with a token — the name and avatar people see in Discord. Every service posts as one bot; one bot can serve every service, or a service can have its own. Tokens are checked against Discord when set and never shown again.</p>
-{% include "partials/presence_table.html" %}
+<p class="text-sm opacity-70 mb-4 max-w-3xl">A bot is a Discord application with a token — the name and avatar people see in Discord. One section below per Discord server, holding the bots that post in it: a bot serves whichever servers its services post in, so the same bot can be listed in more than one section. Tokens are checked against Discord when set and never shown again.</p>
+{% include "partials/presence_groups.html" %}
 
 <div class="card bg-base-200 shadow-sm mt-6 max-w-xl">
-  <form class="card-body p-4 gap-3" method="post" action="/presences" hx-post="/presences" hx-target="#presence-table" hx-swap="outerHTML">
+  <form class="card-body p-4 gap-3" method="post" action="/presences" hx-post="/presences" hx-target="#bots" hx-swap="outerHTML">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <h3 class="text-xs uppercase tracking-widest opacity-60">Add a bot</h3>
     <p class="text-xs opacity-70"><a href="https://discord.com/developers/applications" target="_blank" rel="noopener" class="link">Developer portal</a> → New Application → Bot → Reset Token. Give it a short name here, then paste the token in its row.</p>
@@ -14,7 +14,7 @@
       <input name="label" class="input input-bordered input-sm" placeholder="label shown in this UI (optional)">
       <button class="btn btn-primary btn-sm">Add</button>
     </div>
-    <p class="text-xs opacity-60">Then pick it on a service's settings page under "posts as".</p>
+    <p class="text-xs opacity-60">A new bot waits under "Not in use" until you pick it on a service's settings page under "posts as" — from then on it serves whichever servers those services post in, and shows up in each of their sections.</p>
   </form>
 </div>
 {% endblock %}

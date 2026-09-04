@@ -1,10 +1,10 @@
-<div id="presence-table" class="overflow-x-auto rounded-box bg-base-200 shadow-sm">
+<div class="overflow-x-auto rounded-box bg-base-200 shadow-sm">
   <table class="table table-sm">
     <thead><tr>
       <th>bot</th><th>token</th><th>posts for</th><th>status</th><th>invite</th><th class="text-right"></th>
     </tr></thead>
     <tbody>
-      {% for row in rows %}
+      {% for row in group.rows %}
       {% include "partials/presence_row.html" %}
       {% endfor %}
     </tbody>

@@ -1,6 +1,6 @@
 # periscope v2 — one service, many integrations, a web UI
 
-Status: implemented in 2.0.0 (core runtime, presences, YAML store, service contract, arr split, plexrequests, web UI).
+Status: implemented (core runtime, presences, YAML store, service contract, arr split, plexrequests, web UI).
 Roadmap services in §2 are not built yet. v1 `.env` installs migrate in place via `periscope update`.
 
 ## 1. Shape

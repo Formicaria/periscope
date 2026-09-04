@@ -45,3 +45,22 @@ Tag `vX.Y.Z` on `main`; `docker.yml` pushes `ghcr.io/formicaria/periscope-<name>
 - `pihole` — blocked %, top clients
 - `power` — UPS via NUT
 - cross-lab `/lab status` roll-up bot that reads every board and posts one summary
+
+## Releases
+
+Every change ships as a release, the way the other Formicaria repos do it:
+
+1. Bump the version in `core/src/periscope/__init__.py`, `web/src/periscope_web/__init__.py`,
+   `core/pyproject.toml` and `web/pyproject.toml` — all four carry the same number.
+2. Add a `## vX.Y.Z` section at the top of `CHANGELOG.md` saying what changed and why.
+3. Commit, then tag and push the tag:
+
+```bash
+git commit -am "vX.Y.Z: what changed"
+git push
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+`.github/workflows/release.yml` takes it from there: it refuses a tag that does not match `__version__` or has
+no CHANGELOG section, runs the test suite, pushes `ghcr.io/formicaria/periscope:X.Y.Z` and `:latest`, and
+publishes the release **PERISCOPE vX.Y.Z** with that CHANGELOG section as its notes and a source archive attached.

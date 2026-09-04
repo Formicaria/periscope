@@ -139,12 +139,14 @@ async def test_presences_page_add_token_invite(client, reload, api_calls):
     r = await client.post("/presences", data={"name": "Bad Name"}, headers=HX)
     assert r.status_code == 422
     r = await client.post("/presences", data={"name": "plex", "label": "Plex bot"}, headers=HX)
-    assert r.status_code == 200 and 'id="presence-plex"' in r.text
+    assert r.status_code == 200 and 'id="bots"' in r.text                               # the whole grouped list
+    assert 'id="presence-unused-plex"' in r.text                                        # nothing uses it yet
     assert reload().presences["plex"] == {"token": "", "label": "Plex bot"}
     r = await client.post("/presences/plex/token", data={"token": "bad-token"}, headers=HX)
     assert r.status_code == 422 and "rejected" in r.text and reload().presences["plex"]["token"] == ""
     r = await client.post("/presences/plex/token", data={"token": "good-token-abc"}, headers=HX)
     assert r.status_code == 200 and "token works" in r.text and "app id 777" in r.text
+    assert 'id="bots"' in r.text and 'id="presence-unused-plex"' in r.text              # …and the list again, not one row
     assert reload().presences["plex"]["token"] == "good-token-abc" and "good-token-abc" not in r.text
     r = await client.get("/presences/plex/invite")
     assert "client_id=777" in r.text and f"permissions={INVITE_PERMS}" in r.text and "applications.commands" in r.text
@@ -155,13 +157,13 @@ async def test_presences_page_add_token_invite(client, reload, api_calls):
 
 async def test_presences_rename_and_remove(client, reload):
     r = await client.post("/presences/arr/label", data={"label": "Arr stack", "new_name": "media"}, headers=HX)
-    assert r.status_code == 200
+    assert r.status_code == 200 and 'id="bots"' in r.text
     s = reload()
     assert "arr" not in s.presences and s.presences["media"]["label"] == "Arr stack" and s.services["sonarr"]["presence"] == "media"
     r = await client.post("/presences/default/delete", headers=HX)
     assert r.status_code == 422 and "cannot be removed" in r.text                        # the only bot with a token
     r = await client.post("/presences/media/delete", headers=HX)
-    assert r.status_code == 200
+    assert r.status_code == 200 and 'id="bots"' in r.text
     s = reload()
     assert "media" not in s.presences and s.services["sonarr"]["presence"] == "default"
 
