@@ -20,7 +20,15 @@ from periscope_plexrequests.arr import (
     status_of,
 )
 from periscope_plexrequests.backend import RequestBackend, select_backend
-from periscope_plexrequests.cogs.newonplex import fresh_items, new_label
+from periscope_plexrequests.cogs.newonplex import (
+    departed,
+    fresh_items,
+    item_id,
+    looks_like_a_rescan,
+    new_label,
+    prune,
+    remember,
+)
 from periscope_plexrequests.cogs.revoke import lost_role
 from periscope_plexrequests.common import (
     build_invite_embed,
@@ -219,6 +227,67 @@ def test_new_on_plex_and_role_loss_helpers():
     assert lost_role([r], [], "plex members") and not lost_role([], [], "plex members") and not lost_role([r], [r], "plex members")
 
 
+# ----- new-on-plex bookkeeping -------------------------------------------------------------------------
+
+
+def item(key, title="t", added=0.0, kind="movie", guid=True):
+    out = {"key": key, "kind": kind, "title": title, "year": None, "summary": "", "added_at": added}
+    return {**out, "id": f"plex://{kind}/{key}"} if guid else out
+
+
+def test_an_item_is_known_by_its_guid_and_falls_back_to_the_rating_key():
+    assert item_id(item("7")) == "plex://movie/7"
+    assert item_id(item("7", guid=False)) == "7"        # older Plex, or a record written before guids
+    assert item_id({}) == ""
+
+
+def test_fresh_items_drains_oldest_first_so_nothing_is_dropped():
+    items = [item(str(i), added=100 + i) for i in range(8, 0, -1)]          # newest first, as Plex lists them
+    waiting = fresh_items(items, {}, limit=None)
+    assert [i["key"] for i in waiting] == ["1", "2", "3", "4", "5", "6", "7", "8"]
+    assert [i["key"] for i in fresh_items(items, {}, limit=3)] == ["1", "2", "3"]
+    known = {item_id(i): {} for i in items[:5]}                             # the newest five already announced
+    assert [i["key"] for i in fresh_items(items, known, limit=None)] == ["1", "2", "3"]
+    assert fresh_items(items, {item_id(i): {} for i in items}, limit=None) == []
+    assert fresh_items([], {}, limit=None) == []
+
+
+def test_a_rescan_is_told_apart_from_a_delivery():
+    assert not looks_like_a_rescan(0, 30) and not looks_like_a_rescan(1, 30)
+    assert not looks_like_a_rescan(13, 30)          # a season landing at once is not a rescan
+    assert not looks_like_a_rescan(14, 15)          # …nor is a short window mostly turning over
+    assert looks_like_a_rescan(20, 30) and looks_like_a_rescan(30, 30)
+    assert not looks_like_a_rescan(5, 0)            # nothing came back at all: say nothing
+
+
+def test_departures_are_only_judged_as_far_back_as_plex_still_shows():
+    seen = {"plex://movie/1": {"added": 100.0, "title": "Alien"}, "plex://movie/2": {"added": 200.0, "title": "Dune"},
+            "plex://movie/3": {"added": 300.0, "title": "Heat"}, "plex://movie/0": {"added": 10.0, "title": "old"}}
+    window = [item("3", added=300), item("1", added=100)]                   # Dune is gone from the middle
+    assert departed(window, seen) == ["plex://movie/2"]                     # "old" is out of reach, so untouched
+    assert departed([item("3", added=300)], seen) == []                     # a shorter window reaches less far back
+    assert departed([item("1", added=100)], seen) == ["plex://movie/2", "plex://movie/3"]
+    assert departed([], seen) == [] and departed(window, {}) == []
+    assert departed([item("9", guid=False)], seen) == []                    # no dates at all: nothing can be said
+
+
+def test_remember_accumulates_and_keeps_the_date_it_first_saw_something():
+    first = remember({}, [item("1", "Alien", added=100)], now=1000)
+    assert first == {"plex://movie/1": {"first": 1000, "added": 100.0, "title": "Alien"}}
+    later = remember(first, [item("1", "Alien", added=100), item("2", "Dune", added=200)], now=2000)
+    assert later["plex://movie/1"]["first"] == 1000 and later["plex://movie/2"]["first"] == 2000
+    assert set(later) == {"plex://movie/1", "plex://movie/2"}               # the old entry is kept, not replaced
+    assert remember({}, [{"title": "nameless"}], now=1) == {}               # nothing identifiable, nothing stored
+
+
+def test_prune_forgets_what_is_too_old_and_keeps_the_newest_when_capped():
+    now = 1_000_000.0
+    seen = {"a": {"first": now - 10 * 86400}, "b": {"first": now - 90 * 86400}, "c": {"first": now}}
+    assert set(prune(seen, now=now, keep_days=60)) == {"a", "c"}
+    assert set(prune(seen, now=now, keep_days=60, cap=1)) == {"c"}          # the newest survives the ceiling
+    assert prune({}, now=now) == {}
+
+
 # ----- counters + records ------------------------------------------------------------------------------
 
 def test_stats_bump_and_report(tmp_path):
@@ -260,8 +329,10 @@ def test_records_roundtrip(tmp_path):
     rec.mark_history_available(7, 1019)
     assert rec.history(7)[-1]["status"] == "available" and rec.history(7)[-2]["status"] == "queued"
     assert rec.plex_seen() is None
-    rec.set_plex_seen(["1", "2"])
-    assert rec.plex_seen() == ["1", "2"]
+    rec.set_plex_seen({"1": {"first": 5.0, "added": 4.0, "title": "Heat"}, "2": {}})
+    assert rec.plex_seen() == {"1": {"first": 5.0, "added": 4.0, "title": "Heat"}, "2": {}}
+    rec._s.set("plex_seen", ["9", "8"])                 # the standalone bot's list of ratingKeys
+    assert rec.plex_seen() is None                      # unusable, so the next pass baselines quietly
 
 
 # ----- settings -------------------------------------------------------------------------------------------

@@ -715,14 +715,14 @@ async def test_new_on_plex_feed_baselines_then_announces(tmp_path, fakes):
     feed = cog(sb, "NewOnPlexCog")
     plex = FakePlex.instances[-1]
     await feed.new_on_plex.coro(feed)                                   # first pass: silent baseline
-    assert world.new.sent == [] and sb.plexreq.records.plex_seen() == ["1"]
+    assert world.new.sent == [] and set(sb.plexreq.records.plex_seen()) == {"1"}
     plex.recent = [{"key": "3", "kind": "episode", "title": "The Expanse — S01E01 · Dulcinea", "year": None, "summary": ""},
                    {"key": "2", "kind": "movie", "title": "Dune", "year": 2021, "summary": "sand"}] + plex.recent
     await feed.new_on_plex.coro(feed)
     titles = [m.embeds[0].title for m in world.new.sent]
     assert titles == ["🆕 🎬  Dune (2021)", "🆕 📺  The Expanse — S01E01 · Dulcinea"]      # oldest first
     assert world.new.sent[0].embeds[0].footer.text == "Now on lab.example Plex" and world.new.sent[1].embeds[0].description is None
-    assert sb.plexreq.records.plex_seen() == ["3", "2", "1"] and sb.plexreq.stats.data()["totals"]["new_on_plex"] == 2
+    assert set(sb.plexreq.records.plex_seen()) == {"1", "2", "3"} and sb.plexreq.stats.data()["totals"]["new_on_plex"] == 2
     await feed.new_on_plex.coro(feed)
     assert len(world.new.sent) == 2                                     # nothing new → quiet
     await sb.unload()
@@ -813,3 +813,87 @@ async def test_check_unreachable(monkeypatch):
     monkeypatch.setattr(HttpClient, "get_json", boom)
     ok, msg = await check({"PLEX_URL": "http://p", "PLEX_TOKEN": "t"})
     assert not ok and msg == "Plex unreachable: connection refused"
+
+
+# ----- new-on-plex: the feed must never read out the library ---------------------------------------------------------
+
+def _item(key, title, added, kind="movie"):
+    return {"id": f"plex://{kind}/{key}", "key": key, "kind": kind, "title": title, "year": None,
+            "summary": "", "added_at": added}
+
+
+@pytest.mark.asyncio
+async def test_an_item_that_scrolls_out_and_back_is_not_announced_again(tmp_path, fakes):
+    """The reported bug: Plex re-orders its recently-added list after a restart, the old code only remembered
+    whatever was in the last window, and everything that came back around was announced as new."""
+    rt, pres, sb, world = await build(tmp_path, {**BASE, **ARR})
+    feed = cog(sb, "NewOnPlexCog")
+    plex = FakePlex.instances[-1]
+    plex.recent = [_item("3", "Heat", 300), _item("2", "Dune", 200), _item("1", "Alien", 100)]
+    await feed.new_on_plex.coro(feed)                          # baseline
+    assert world.new.sent == []
+
+    plex.recent = [_item("5", "Arrival", 500), _item("4", "Sicario", 400)]     # the first three scroll out
+    await feed.new_on_plex.coro(feed)
+    assert [m.embeds[0].title for m in world.new.sent] == ["🆕 🎬  Sicario", "🆕 🎬  Arrival"]
+
+    plex.recent = [_item("3", "Heat", 300), _item("2", "Dune", 200), _item("1", "Alien", 100)]   # …and back
+    await feed.new_on_plex.coro(feed)
+    assert len(world.new.sent) == 2                            # still two: the feed remembers them
+    await sb.unload()
+
+
+@pytest.mark.asyncio
+async def test_a_rescan_is_adopted_quietly_instead_of_announced(tmp_path, fakes):
+    """A Plex rebuild hands out fresh ratingKeys for the whole shelf. That is not twenty new films."""
+    rt, pres, sb, world = await build(tmp_path, {**BASE, **ARR})
+    feed = cog(sb, "NewOnPlexCog")
+    plex = FakePlex.instances[-1]
+    plex.recent = [_item(str(i), f"film {i}", 100 + i) for i in range(20)]
+    await feed.new_on_plex.coro(feed)                          # baseline
+    plex.recent = [_item(f"re-{i}", f"film {i}", 100 + i) for i in range(20)]   # every id is different now
+    await feed.new_on_plex.coro(feed)
+    assert world.new.sent == []                                # nothing posted…
+    assert len(sb.plexreq.records.plex_seen()) == 40           # …but all of it is now known
+    await sb.unload()
+
+
+@pytest.mark.asyncio
+async def test_more_than_one_pass_worth_lands_over_several_passes(tmp_path, fakes):
+    """A season pack is more than one pass may post; the rest wait rather than being dropped on the floor."""
+    rt, pres, sb, world = await build(tmp_path, {**BASE, **ARR})
+    feed = cog(sb, "NewOnPlexCog")
+    plex = FakePlex.instances[-1]
+    plex.recent = [_item("0", "the shelf as it was", 100)]
+    await feed.new_on_plex.coro(feed)                          # baseline
+    episodes = [_item(str(i), f"The Expanse — S06E{i:02}", 200 + i, kind="episode") for i in range(8, 0, -1)]
+    plex.recent = episodes + plex.recent
+    await feed.new_on_plex.coro(feed)
+    assert len(world.new.sent) == 5                            # oldest first, five this pass
+    assert [m.embeds[0].title for m in world.new.sent][0].endswith("S06E01")
+    await feed.new_on_plex.coro(feed)
+    assert len(world.new.sent) == 8                            # the other three, not lost
+    assert [m.embeds[0].title for m in world.new.sent][-1].endswith("S06E08")
+    await feed.new_on_plex.coro(feed)
+    assert len(world.new.sent) == 8                            # and then quiet
+    await sb.unload()
+
+
+@pytest.mark.asyncio
+async def test_something_deleted_from_plex_is_written_off_not_posted(tmp_path, fakes):
+    from periscope.history import History
+
+    rt, pres, sb, world = await build(tmp_path, {**BASE, **ARR})
+    feed = cog(sb, "NewOnPlexCog")
+    feed.history = History(tmp_path / "data" / "history.db")
+    plex = FakePlex.instances[-1]
+    plex.recent = [_item("3", "Heat", 300), _item("2", "Dune", 200), _item("1", "Alien", 100)]
+    await feed.new_on_plex.coro(feed)                          # baseline
+    plex.recent = [_item("3", "Heat", 300), _item("1", "Alien", 100)]          # Dune is deleted
+    await feed.new_on_plex.coro(feed)
+    assert world.new.sent == []                                # removals never reach the channel
+    assert set(sb.plexreq.records.plex_seen()) == {"plex://movie/1", "plex://movie/3"}
+    gone = feed.history.events(kind="removed")
+    assert [e["title"] for e in gone] == ["Gone from lab.example Plex: Dune"]
+    feed.history.close()
+    await sb.unload()

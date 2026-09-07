@@ -438,7 +438,7 @@ async def test_customised_feed_board_and_replies(tmp_path, fakes):
     store.set(NEW_ON_PLEX_KIND, None, enabled=False)
     plex.recent = [{"key": "3", "kind": "episode", "title": "The Expanse — S01E01 · Dulcinea", "year": None, "summary": ""}] + plex.recent
     await feed.new_on_plex.coro(feed)
-    assert len(world.new.sent) == 1 and sb.plexreq.records.plex_seen() == ["3", "2", "1"]
+    assert len(world.new.sent) == 1 and set(sb.plexreq.records.plex_seen()) == {"1", "2", "3"}
     store.reset(NEW_ON_PLEX_KIND)
     await feed.new_on_plex.coro(feed)
     assert len(world.new.sent) == 1                                     # nothing new: the switched-off pass baselined it

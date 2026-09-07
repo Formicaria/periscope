@@ -14,6 +14,9 @@ log = logging.getLogger(__name__)
 InviteResult = tuple[str, str]   # status: sent | pending | updated | error, and a human detail
 
 
+FEED_KINDS = ("movie", "episode")   # what the new-on-Plex feed is about: films and TV, not music or photos
+
+
 def wanted_sections(sections: list[Any], libraries: str) -> list[Any]:
     """Filter library sections by the LIBRARIES setting ('all' or comma-separated titles, case-insensitive)."""
     if (libraries or "all").strip().lower() == "all":
@@ -130,17 +133,32 @@ class PlexGateway:
             lines.append(f"**{user}** — {title[:55]} ({pct}%)")
         return lines
 
-    def recently_added(self, limit: int = 30) -> list[dict[str, Any]]:
-        out = []
-        for it in self.server().library.recentlyAdded()[:limit]:
+    def recently_added(self, limit: int = 30, kinds: tuple[str, ...] = FEED_KINDS) -> list[dict[str, Any]]:
+        """The newest things in the library, newest first — films and episodes, nothing else by default.
+
+        `id` is the item's Plex guid when it has one. Unlike `ratingKey`, a guid survives a library rescan or
+        a rebuilt database, so restarting Plex does not make every film on the shelf look newly added.
+        `added_at` is when Plex says it landed, which is what tells the feed how far back it can still see.
+
+        The kind filter runs before the limit, so a music library churning away cannot crowd films and
+        episodes out of the window.
+        """
+        out: list[dict[str, Any]] = []
+        for it in self.server().library.recentlyAdded():
             kind = getattr(it, "type", "?")
+            if kinds and kind not in kinds:
+                continue
             if kind == "episode":
                 title = f"{it.grandparentTitle} — S{it.parentIndex:02}E{it.index:02} · {it.title}"
             elif kind == "season":
                 title = f"{it.parentTitle} — {it.title}"
             else:
                 title = getattr(it, "title", "?")
-            out.append({"key": str(it.ratingKey), "kind": kind, "title": title,
-                        "year": getattr(it, "year", None),
+            added = getattr(it, "addedAt", None)
+            out.append({"id": str(getattr(it, "guid", "") or it.ratingKey), "key": str(it.ratingKey),
+                        "kind": kind, "title": title, "year": getattr(it, "year", None),
+                        "added_at": added.timestamp() if hasattr(added, "timestamp") else float(added or 0),
                         "summary": (getattr(it, "summary", "") or "")[:280]})
+            if len(out) >= limit:
+                break
         return out

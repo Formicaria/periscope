@@ -75,10 +75,19 @@ class Records:
         if changed:
             self._s.set("requests", all_hist)
 
-    # ----- new-on-plex baseline -----
-    def plex_seen(self) -> list[str] | None:
-        v = self._s.get("plex_seen")
-        return list(v) if v is not None else None
+    # ----- new-on-plex: what the feed has already announced -----
+    def plex_seen(self) -> dict[str, dict[str, Any]] | None:
+        """Everything the feed has announced, by stable id — or None when it has never run.
 
-    def set_plex_seen(self, keys: list[str]) -> None:
-        self._s.set("plex_seen", list(keys))
+        Each entry says when Plex added the item (`added`), when the feed first saw it (`first`) and what it
+        was called, which is what lets the next pass tell a genuine arrival from something it has already
+        talked about. Older installs, and the standalone bot, kept a plain list of ratingKeys instead: those
+        ids do not survive a Plex rescan and carry no dates, so a list reads back as None and the next pass
+        baselines quietly rather than announcing a library's worth of "new" films."""
+        v = self._s.get("plex_seen")
+        if not isinstance(v, dict):
+            return None
+        return {str(k): dict(meta) if isinstance(meta, dict) else {} for k, meta in v.items()}
+
+    def set_plex_seen(self, seen: dict[str, dict[str, Any]]) -> None:
+        self._s.set("plex_seen", {str(k): dict(meta or {}) for k, meta in dict(seen).items()})
