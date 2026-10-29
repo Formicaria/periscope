@@ -617,3 +617,58 @@ def test_the_status_field_says_what_happened():
                                    "suppressed_reason": "Backups"}))
     assert "Seen 4 times" in lines and "Acked by Alice" in lines
     assert "after 15 minutes" in lines and "Backups" in lines
+
+
+# ----- forwarding to an on-call endpoint --------------------------------------------------------------------
+async def drain(r):
+    import asyncio
+    while r._tasks:
+        await asyncio.gather(*list(r._tasks), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_forwarding_is_off_until_a_url_is_set(tmp_path, monkeypatch):
+    from periscope.alerts import forward_target
+    monkeypatch.delenv("ALERT_FORWARD_URL", raising=False)
+    r = router_for(tmp_path)
+    sent = []
+    monkeypatch.setattr(r, "_send_forward", lambda *a: sent.append(a))
+    await r.fire(cpu())
+    assert sent == [] and forward_target(r.bot) == ("", "")
+    r.bot.env["ALERT_FORWARD_URL"] = "ftp://nope"
+    assert forward_target(r.bot) == ("", "")                     # not http(s): stays off, says why in the log
+
+
+@pytest.mark.asyncio
+async def test_new_cards_acks_snoozes_and_resolves_are_forwarded_but_repeats_are_not(tmp_path, monkeypatch):
+    r = router_for(tmp_path)
+    r.bot.env.update({"ALERT_FORWARD_URL": "http://10.10.10.57:8790/alert", "ALERT_FORWARD_TOKEN": "s3cret"})
+    sent = []
+
+    async def capture(url, token, payload):
+        sent.append((url, token, payload))
+
+    monkeypatch.setattr(r, "_send_forward", capture)
+    await r.fire(cpu(Severity.CRITICAL))
+    await r.fire(cpu(Severity.CRITICAL))                        # repeat: the card counts it, nobody else hears
+    await r.ack("pve:node:pve1:cpu", who="Zachary")
+    await r.snooze("pve:node:pve1:cpu", 8, who="Zachary")
+    await r.resolve("pve:node:pve1:cpu", note="load came back down")
+    await drain(r)
+    events = [p["event"] for _, _, p in sent]
+    assert events == ["fire", "ack", "snooze", "resolve"]
+    url, token, fire = sent[0]
+    assert url.endswith(":8790/alert") and token == "s3cret"
+    assert fire["title"] == "High CPU on pve1" and fire["severity"] == Severity.CRITICAL.value
+    assert fire["fields"] == {"Node": "pve1"} and fire["service"] == "pve" and fire["count"] == 1
+    assert sent[1][2]["note"] == "by Zachary" and sent[3][2]["note"] == "load came back down"
+    assert sent[3][2]["count"] == 2                              # the resolve carries how often it fired
+
+
+@pytest.mark.asyncio
+async def test_a_dead_forward_endpoint_never_costs_the_alert(tmp_path):
+    r = router_for(tmp_path)
+    r.bot.env["ALERT_FORWARD_URL"] = "http://127.0.0.1:9/alert"   # nothing listens on the discard port
+    msg = await r.fire(cpu())
+    await drain(r)
+    assert msg is not None and len(r.bot.channel.cards) == 1

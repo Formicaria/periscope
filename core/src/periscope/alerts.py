@@ -15,6 +15,11 @@ when it stops. This module decides what that means:
   the suppression is logged and recorded, and if a card for that alert is already up it says the alert would
   have fired. A window config that cannot be read keeps nobody quiet: alerts go out.
 
+* **Forwarding.** With `ALERT_FORWARD_URL` set, every new card, resolve, ack and snooze is also POSTed there as
+  JSON (bearer `ALERT_FORWARD_TOKEN`) for whatever is on call besides the humans — a pager, a log, an agent.
+  Fire-and-forget on its own task: a dead endpoint costs a log line, never an alert. Repeats of an open card
+  are not forwarded; the card's counter is the place for those.
+
 Nothing here may raise into a send site. A missing channel, a deleted message, a broken template, a bad
 window file — each is logged and the alert still gets the best treatment available.
 """
@@ -44,6 +49,7 @@ ALERT_KIND, RESOLVED_KIND = "core.alert", "core.alert_resolved"
 STATUS_FIELD = "Status"                 # the one embed field this module owns and rewrites
 DEFAULT_ESCALATE_MIN = 0                # 0 = never escalate
 MAX_SEEN_SHOWN = 999
+FORWARD_TIMEOUT_S = 5
 
 
 @dataclass
@@ -83,6 +89,25 @@ def escalate_minutes(bot: Any) -> int:
             log.warning("ALERT_ESCALATE_MIN is not a number (%r) — escalation stays off", raw)
             return DEFAULT_ESCALATE_MIN
     return DEFAULT_ESCALATE_MIN
+
+
+def forward_target(bot: Any) -> tuple[str, str]:
+    """`ALERT_FORWARD_URL` and `ALERT_FORWARD_TOKEN`: where alert events are also POSTed, and the bearer token
+    that goes with them. Same lookup as escalate_minutes — the service's environment, then the process's — so
+    it can be set once for the install (the Settings page's global keys) or per service. ("", "") = off."""
+    env = getattr(bot, "env", None)
+
+    def pick(key: str) -> str:
+        for raw in (env.get(key) if isinstance(env, dict) else None, os.environ.get(key)):
+            if raw is not None and str(raw).strip():
+                return str(raw).strip()
+        return ""
+
+    url = pick("ALERT_FORWARD_URL")
+    if url and not url.startswith(("http://", "https://")):
+        log.warning("ALERT_FORWARD_URL must start with http:// or https:// (got %r) — forwarding stays off", url)
+        return "", ""
+    return url, pick("ALERT_FORWARD_TOKEN")
 
 
 # ----- what the card says ----------------------------------------------------------------------------------
@@ -242,6 +267,51 @@ class AlertRouter:
         except Exception:  # noqa: BLE001 - the log is a nicety; it never blocks an alert
             log.debug("[%s] history.record failed for %s", self.scope, fingerprint, exc_info=True)
 
+    # ----- forwarding ----------------------------------------------------------------------------------
+    def _forward(self, event: str, fingerprint: str, record: dict[str, Any], alert: Alert | None = None,
+                 note: str = "") -> None:
+        """Hand one alert event to ALERT_FORWARD_URL on its own task. Never raises, never waits."""
+        url, token = forward_target(self.bot)
+        if not url:
+            return
+        settings = getattr(self.bot, "settings", None)
+        payload = {
+            "event": event,
+            "fingerprint": fingerprint,
+            "service": self.scope,
+            "server": self.server_name,
+            "lab": str(getattr(settings, "lab_name", "") or ""),
+            "ts": time.time(),
+            "title": alert.title if alert else str(record.get("title") or fingerprint),
+            "severity": alert.severity.value if alert else str(record.get("severity") or ""),
+            "description": alert.description if alert else "",
+            "fields": {str(k): str(v) for k, v in (alert.fields if alert else {}).items()},
+            "url": alert.url if alert else None,
+            "count": int(record.get("count") or 0),
+            "first_ts": record.get("first_ts"),
+            "note": note,
+        }
+        try:
+            task = asyncio.get_running_loop().create_task(self._send_forward(url, token, payload))
+        except RuntimeError:                    # no loop (a sync test): nothing to forward on
+            return
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _send_forward(self, url: str, token: str, payload: dict[str, Any]) -> None:
+        import aiohttp                          # only needed once someone turns forwarding on
+
+        headers = {"Content-Type": "application/json", "User-Agent": "periscope-alerts"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=FORWARD_TIMEOUT_S)) as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status >= 300:
+                        log.warning("[%s] alert forward %s → HTTP %s", self.scope, payload["event"], resp.status)
+        except Exception as err:  # noqa: BLE001 — the forward is a copy; the alert already went out
+            log.warning("[%s] alert forward %s to %s failed: %s", self.scope, payload["event"], url, err)
+
     # ----- fire ----------------------------------------------------------------------------------------
     async def fire(self, alert: Alert, force: bool = False) -> discord.Message | None:
         now = time.time()
@@ -288,6 +358,7 @@ class AlertRouter:
         self._arm_escalation(alert, record, now)
         self._put(alert.fingerprint, record)
         self._last_sent[alert.fingerprint] = now
+        self._forward("fire", alert.fingerprint, record, alert)
         return msg
 
     async def _repeat(self, alert: Alert, record: dict[str, Any], now: float) -> discord.Message | None:
@@ -470,6 +541,7 @@ class AlertRouter:
         record.pop("escalate_at", None)
         self._put(fingerprint, record)
         self._remember(fingerprint, record, "acked", f"by {who}" if who else "")
+        self._forward("ack", fingerprint, record, note=f"by {who}" if who else "")
         await self._refresh_card(fingerprint, record)
         log.info("alert %s acked by %s", fingerprint, who or "an admin")
         return True
@@ -485,6 +557,7 @@ class AlertRouter:
         record.pop("snooze_expired_ts", None)
         self._put(fingerprint, record)
         self._remember(fingerprint, record, "snoozed", f"for {hours}h" + (f" by {who}" if who else ""))
+        self._forward("snooze", fingerprint, record, note=f"for {hours}h" + (f" by {who}" if who else ""))
         await self._refresh_card(fingerprint, record)
         log.info("alert %s snoozed for %sh by %s", fingerprint, hours, who or "an admin")
         return True
@@ -496,6 +569,7 @@ class AlertRouter:
             return False                        # nothing to resolve; avoid a state write
         self._state.pop(fingerprint)
         self._remember(fingerprint, record, "resolved", note or (f"by {by}" if by else ""))
+        self._forward("resolve", fingerprint, record, note=note or (f"by {by}" if by else ""))
         msg = await self._message(record)
         if msg is None or not msg.embeds:
             return False

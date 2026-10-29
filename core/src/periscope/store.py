@@ -33,7 +33,9 @@ SERVER_KEYS = {
     "name": "LAB_NAME", "color": "LAB_COLOR", "guild_id": "GUILD_ID", "status_channel_id": "STATUS_CHANNEL_ID",
     "alert_channel_id": "ALERT_CHANNEL_ID", "alert_role_id": "ALERT_ROLE_ID", "admin_role_ids": "ADMIN_ROLE_IDS",
 }
-GLOBAL_KEYS = {"log_level": "LOG_LEVEL", "status_interval_s": "STATUS_INTERVAL_S"}
+GLOBAL_KEYS = {"log_level": "LOG_LEVEL", "status_interval_s": "STATUS_INTERVAL_S",
+               # where alert events are also POSTed (an on-call agent, a pager) — see alerts.forward_target
+               "alert_forward_url": "ALERT_FORWARD_URL", "alert_forward_token": "ALERT_FORWARD_TOKEN"}
 LAB_KEYS = {**SERVER_KEYS, **GLOBAL_KEYS}      # v1 name, kept so older code and tests keep working
 MAIN = "main"                                   # the first server's key
 
