@@ -4,6 +4,36 @@ Every release is a tag (`vX.Y.Z`) whose section here becomes the GitHub release 
 repo carries the same version — every `__init__.py` and every `pyproject.toml` — and the release workflow
 refuses a tag that disagrees with any of them or has no section here.
 
+## Unreleased
+
+**COMMUNITY.** A new service for the people who *use* the lab rather than run it. It watches every resource a
+members' Discord server depends on — Plex, the storage behind it, request and invite apps, game servers — and keeps
+a status board in a PSA channel. When something stays down past a grace period it posts once per root cause, and
+says why: it asks Proxmox whether the host is offline, the container stopped, a dependency went down first, or the
+box is up and the app just isn't answering, then folds everything one cause took down into the same post. The post
+updates itself and flips to Resolved with a "back up" reply when it's over. Admins get `/psa maint schedule|now|
+extend|done|cancel|list` — times like `fri 10pm` or `in 2h`, read in the server's time zone, posted as Discord
+timestamps so everyone sees their own — with an hour-ahead reminder, start and finish posts, and a matching
+maintenance window so periscope's own alerts stay quiet while it happens. `/psa post` and a watched outbox folder
+cover announcements. Proxmox access is borrowed from the `proxmox` service, not configured twice.
+
+Who gets pinged is fixed, not a per-post choice: outage and maintenance posts ping only the roles of what they
+hit (each resource names its own ping roles in `RESOURCES`), while announcements and changelogs — `/psa post` and
+the outbox — always ping `ANNOUNCE_PING`, which is @everyone unless you say otherwise.
+
+**LINK.** `/link` ties a member's Discord account to the things they actually use, so those pings reach the right
+people without anyone hand-assigning roles. `/link minecraft` hands out a six-character code; the player says
+`link ABC123` in game, the server's existing chat bridge relays it into Discord, and the bot gives that player the
+server's role (`LINK_MINECRAFT`: resource, bridge channel, roles). Linked names seen talking on another bridged
+server pick up that server's role too. `/link plex` signs in through plex.tv's own PIN flow, checks the account is
+really shared on your server, and grants `LINK_PLEX_ROLE` — the member's Plex token is used once and never kept.
+`/link status`, `/link remove`, and admin `/link list` / `/link sync` round it out.
+
+**ALERT FORWARDING.** Set `alert_forward_url` (and optionally `alert_forward_token`) and every new alert card, ack,
+snooze and resolve is also POSTed as JSON to that URL — fingerprint, service, severity, title, description, fields,
+count — with a bearer token and a five-second timeout. It never blocks or breaks the Discord side, and repeats of an
+open alert aren't re-sent. Point it at a webhook receiver, a pager bridge, or an agent that triages for you.
+
 ## v0.2.0
 
 Four things periscope could not do before: change a setting without a restart, remember anything, be told to be

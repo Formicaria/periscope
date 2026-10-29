@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bot: [core, proxmox, prometheus, arr, unifi, github, plexrequests, docker, web]
+        bot: [core, proxmox, prometheus, arr, unifi, github, plexrequests, docker, community, web]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

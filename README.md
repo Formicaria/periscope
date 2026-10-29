@@ -22,6 +22,7 @@
 | [`docker`](bots/docker) | Docker · Portainer | `/docker` | containers up/exited board, restart-loop and unhealthy alerts, image updates, restart/start/stop/logs/stats |
 | [`github`](bots/github) | a GitHub organization | `/gh` | push/PR/issue/release/CI/fork/star feed, per-repo channel routing, CI-failure alerts, polling fallback |
 | [`plexrequests`](bots/plexrequests) | Plex · Overseerr/Jellyseerr or Radarr/Sonarr | `/requests` + `/plexinvite` | **Get Plex Access** invites with role grant, **Search & Request** with availability cards, live status board, new-on-Plex feed, auto-revoke, usage stats |
+| [`community`](bots/community) | the services a members' server uses | `/psa` + `/link` | public status board, **outage posts that say why** (host down · container stopped · storage down · app not answering), admin-scheduled maintenance announced with countdowns, announcements from a form or a dropped `.md`, **`/link`** to tie members' Minecraft and Plex accounts to Discord roles |
 
 Everything shares [`core/`](core): branded embeds, an alert router (dedupe, cooldown, resolve-in-place, role ping on critical), pinned live status boards, Confirm/Paginate/Refresh views, an HMAC-checked webhook server, and JSON state. Every integration is a *service* you switch on individually; they all run in one process and are supervised separately, so one failing never touches the others. Design notes: [`docs/SPEC-v2.md`](docs/SPEC-v2.md).
 
