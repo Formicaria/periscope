@@ -1,5 +1,5 @@
 """The watcher: probe everything every minute, keep the board current, post outages (with the why) and their
-recoveries, and send anything dropped in the outbox.
+recoveries, send anything dropped in the outbox, and keep the channel pages in sync.
 
 Rules that keep the channel worth reading:
   * nothing is posted until a resource has been down for OUTAGE_GRACE_S — restarts and blips stay invisible
@@ -24,6 +24,7 @@ from discord.ext import commands, tasks
 from periscope import Alert, RefreshView, Severity, StatusBoard
 
 from .. import messages as M
+from .. import pages
 from .. import roles
 from ..diagnose import Cause, group, is_down
 from ..probes import Probe, probe
@@ -130,6 +131,7 @@ class Watch(commands.Cog):
         if self.cfg.board:
             await self.render(rows, now)
         await self.drain_outbox()
+        await pages.sync(self.bot, self.cfg.pages, self.state)
 
     # ----- outages -------------------------------------------------------------------------------------------
     async def reconcile(self, causes: list[Cause], down_keys: set[str], down_since: dict[str, float],

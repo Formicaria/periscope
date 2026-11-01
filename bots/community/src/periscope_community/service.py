@@ -53,6 +53,11 @@ async def build(bot: ServiceBot) -> None:
             cfg.outbox.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             log.warning("community: outbox %s unusable: %s", cfg.outbox, e)
+    if cfg.pages:
+        try:
+            cfg.pages.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            log.warning("community: pages folder %s unusable: %s", cfg.pages, e)
     for path in COGS:
         await bot.load_extension(path)
 

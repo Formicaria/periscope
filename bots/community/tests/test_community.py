@@ -273,3 +273,105 @@ def test_announcement_ping():
     assert roles.announcement(bot, "")[0] == "@everyone" and roles.announcement(bot, "@here")[0] == "@here"
     assert roles.announcement(bot, "none")[0] is None and roles.announcement(bot, "off")[0] is None
     assert roles.announcement(bot, "plex members")[0] == "<@&111111111111111111>"
+
+
+# ----- pages -------------------------------------------------------------------------------------------------
+from periscope_community import pages as P  # noqa: E402
+
+PAGE = """---
+channel: 1566514202431193169
+color: #5A189A
+---
+# Welcome
+Hello there.
+
+## not a new card
+still the welcome card
+
+# Rules
+Be decent.
+"""
+
+
+def test_page_parse():
+    p = P.parse("welcome", PAGE)
+    assert p.channel_id == 1566514202431193169 and p.color == 0x5A189A
+    assert [t for t, _ in p.sections] == ["Welcome", "Rules"]
+    assert "## not a new card" in p.sections[0][1]
+    assert p.digest == P.parse("welcome", PAGE).digest != P.parse("welcome", PAGE + "x").digest
+
+
+@pytest.mark.parametrize("text", ["# no front matter", "---\nchannel: nope\n---\n# x", "---\nchannel: 1\n---\n",
+                                  "---\nchannel: 1\ncolor: purple\n---\n# x"])
+def test_page_bad(text):
+    with pytest.raises(ValueError):
+        P.parse("bad", text)
+
+
+def test_page_intro_and_batches():
+    p = P.parse("faq", "---\nchannel: <#42>\n---\nintro line\n" + "".join(f"# Q{i}\n{'a' * 900}\n" for i in range(12)))
+    assert p.channel_id == 42 and p.sections[0] == ("", "intro line")
+    msgs = P.embeds(p, lab="ztechnus.com")
+    assert sum(len(m) for m in msgs) == 13 and all(len(m) <= 10 for m in msgs)
+    assert all(sum(len(e.title or "") + len(e.description or "") for e in m) <= 6000 for m in msgs)
+    assert msgs[0][0].title is None and msgs[-1][-1].footer.text and not msgs[0][1].footer.text
+
+
+class _Msg:
+    _n = 100
+
+    def __init__(self, ch):
+        _Msg._n += 1
+        self.id, self.ch, self.embeds = _Msg._n, ch, None
+
+    async def edit(self, content=None, embeds=None):
+        self.embeds = embeds
+        self.ch.edits += 1
+
+    async def delete(self):
+        self.ch.msgs.pop(self.id, None)
+
+
+class _Chan:
+    name = "welcome"
+
+    def __init__(self):
+        self.msgs, self.sent, self.edits = {}, 0, 0
+
+    async def send(self, embeds=None, allowed_mentions=None):
+        m = _Msg(self)
+        m.embeds = embeds
+        self.msgs[m.id] = m
+        self.sent += 1
+        return m
+
+    async def fetch_message(self, mid):
+        import discord
+        if mid not in self.msgs:
+            raise discord.NotFound(type("R", (), {"status": 404, "reason": "gone"})(), "gone")
+        return self.msgs[mid]
+
+
+class _State(dict):
+    def set(self, k, v):
+        self[k] = v
+
+
+@pytest.mark.asyncio
+async def test_page_sync_posts_then_edits(tmp_path):
+    ch = _Chan()
+    bot = type("B", (), {"lab_name": "ztechnus.com"})()
+
+    async def get_channel_safe(cid):
+        return ch
+    bot.get_channel_safe = get_channel_safe
+    st = _State()
+    (tmp_path / "welcome.md").write_text(PAGE, encoding="utf-8")
+    await P.sync(bot, tmp_path, st)
+    assert ch.sent == 1 and ch.edits == 0
+    await P.sync(bot, tmp_path, st)                       # unchanged: nothing happens
+    assert ch.sent == 1 and ch.edits == 0
+    (tmp_path / "welcome.md").write_text(PAGE.replace("Be decent.", "Be very decent."), encoding="utf-8")
+    await P.sync(bot, tmp_path, st)                       # changed: edited in place, not reposted
+    assert ch.sent == 1 and ch.edits == 1
+    assert st["pages"]["welcome"]["mids"] == list(ch.msgs)

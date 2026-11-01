@@ -152,6 +152,7 @@ class CommunitySettings:
     pve_from: str = "proxmox"
     board: bool = True
     outbox: Path = Path("data/psa-outbox")
+    pages: Path = Path("data/pages")
     bridges: list[Bridge] = field(default_factory=list)
     plex_role: str = ""               # the role a verified Plex user gets from /link plex ("" = /link plex is off)
     plex_from: str = "plexrequests"   # whose PLEX_URL / PLEX_TOKEN /link plex checks membership with
@@ -171,6 +172,7 @@ class CommunitySettings:
             pve_from=(env("PVE_FROM_SERVICE", "proxmox") or "").strip(),
             board=env_bool("COMMUNITY_BOARD", True),
             outbox=Path(env("PSA_OUTBOX", "data/psa-outbox") or "data/psa-outbox"),
+            pages=Path(env("PAGES_DIR", "data/pages") or "data/pages"),
             bridges=bridges,
             plex_role=(env("LINK_PLEX_ROLE", "") or "").strip().lstrip("@"),
             plex_from=(env("PLEX_FROM_SERVICE", "plexrequests") or "").strip(),

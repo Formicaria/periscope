@@ -9,6 +9,7 @@ boxes; this one talks to the people who *use* them — so "is Plex down?" is ans
 | **Outage posts that say why** | something down for `OUTAGE_GRACE_S` gets one post — "pve3 is offline", "Plex's container is stopped", "media storage is down", "the server is up but Plex isn't answering" — worked out from Proxmox. One post per root cause listing everything it took down; edited as the picture changes; flipped to **Resolved** with a "back up" reply when it's over |
 | **Maintenance** | `/psa maint schedule fri 10pm 2h "Moving Plex to pve2" Plex` posts the notice with a countdown in everyone's own time zone, reminds an hour ahead, says when it starts and when it's done, and keeps periscope's own alerts quiet for the window |
 | **Announcements** | `/psa post` (a form for the long text), or drop a `.md` file in `PSA_OUTBOX` and it goes out on the next pass. Announcements and changelogs always ping `ANNOUNCE_PING` (@everyone) |
+| **Pages** | One `.md` per channel in `PAGES_DIR` (front matter `channel: <id>`) becomes clean embeds there, one card per `# ` heading. Edit the file and the post is edited in place: no repost, no ping. For #welcome, #rules, #faq, #guides |
 | **Who gets pinged** | outages and maintenance ping the roles of what they hit (the last field of each RESOURCES entry); announcements ping everyone |
 | **Linking** | `/link minecraft` and `/link plex` tie a member's Discord to their game / Plex account and give them that thing's role — see below |
 
