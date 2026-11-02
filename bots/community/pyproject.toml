@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "periscope_community"
-version = "0.2.0"
+version = "0.3.0"
 description = "periscope service for a community Discord: public status board, outage notices that say why, and admin-scheduled maintenance announcements."
 readme = "README.md"
 license = { text = "MIT" }

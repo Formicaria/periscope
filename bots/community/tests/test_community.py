@@ -139,7 +139,9 @@ class FakeWindows:
         return self.w.pop(wid, None) is not None
 
 
-def test_book_lifecycle():
+def test_book_lifecycle(monkeypatch):
+    import periscope_community.book as book_mod
+    monkeypatch.setattr(book_mod.time, "time", lambda: NOW.timestamp())   # extend() bases on now; pin it to NOW
     st, win = FakeState(), FakeWindows()
     book = MaintBook(st, win, TZ, slugify=lambda s: s.lower().replace(" ", "-"))
     t0 = NOW.timestamp() + 3600

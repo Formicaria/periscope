@@ -4,7 +4,11 @@ Every release is a tag (`vX.Y.Z`) whose section here becomes the GitHub release 
 repo carries the same version — every `__init__.py` and every `pyproject.toml` — and the release workflow
 refuses a tag that disagrees with any of them or has no section here.
 
-## Unreleased
+## v0.3.0
+
+periscope gets a public face. Everything so far watched the lab for the people who run it; this release is for the
+people who use it: a status board and outage posts they can read, roles that ping the right players, and the
+channels they read first, kept tidy by the bot.
 
 **COMMUNITY.** A new service for the people who *use* the lab rather than run it. It watches every resource a
 members' Discord server depends on — Plex, the storage behind it, request and invite apps, game servers — and keeps
@@ -28,6 +32,12 @@ server's role (`LINK_MINECRAFT`: resource, bridge channel, roles). Linked names 
 server pick up that server's role too. `/link plex` signs in through plex.tv's own PIN flow, checks the account is
 really shared on your server, and grants `LINK_PLEX_ROLE` — the member's Plex token is used once and never kept.
 `/link status`, `/link remove`, and admin `/link list` / `/link sync` round it out.
+
+**PAGES.** The channels people read first (#welcome, #rules, #faq, #guides) can now belong to the bot. Drop one
+Markdown file per channel in `PAGES_DIR` with `channel: <id>` in the front matter, and every `# ` heading becomes a
+card, styled like the announcements. Edit the file and the same message is edited in place within a minute: no
+repost, no ping, no unread badge. A page that outgrows one message spills into a second; one that shrinks cleans up
+its own leftovers. Delete the file and the post stays where it is.
 
 **ALERT FORWARDING.** Set `alert_forward_url` (and optionally `alert_forward_token`) and every new alert card, ack,
 snooze and resolve is also POSTed as JSON to that URL — fingerprint, service, severity, title, description, fields,
